@@ -20,7 +20,7 @@ def send_discord_message(message_content=None, username="SWADE Bot", embed=None)
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
     except:
-        pass # Silently fail on the web if Discord hiccups
+        pass 
 
 # --- Classes ---
 class Card:
@@ -64,6 +64,23 @@ class Deck:
         self.drawn_cards_tracker[str(card)] += 1
         return card
 
+    def get_remaining_cards(self):
+        return len(self.cards)
+
+    def get_discard_count(self):
+        return len(self.discard_pile)
+
+    def get_drawn_card_report(self):
+        report_lines = []
+        drawn_any = False
+        for card_str, count in self.drawn_cards_tracker.items():
+            if count > 0:
+                report_lines.append(f"- {card_str}: {count} time(s)")
+                drawn_any = True
+        if not drawn_any:
+            report_lines.append("No cards drawn yet.")
+        return "\n".join(report_lines)
+
 class Player:
     def __init__(self, name):
         self.name = name
@@ -106,7 +123,8 @@ with col1:
             st.error("Add at least one player first!")
         else:
             st.session_state.round_counter += 1
-            deck = st.session_state.deck
+            # Explicitly pulling deck from session state to ensure global scope
+            current_deck = st.session_state.deck
             players = st.session_state.players
             rn = st.session_state.round_counter
             
@@ -115,11 +133,13 @@ with col1:
             cards_dealt = []
 
             for player in players:
-                card = deck.deal_card()
+                card = current_deck.deal_card()
                 player.initiative_card = card
-                cards_dealt.append(card)
-                draw_log += f"{player.name} drew: {card}\n"
-                if card and card.rank == 'Joker': joker_drawn = True
+                if card:
+                    cards_dealt.append(card)
+                    draw_log += f"{player.name} drew: {card}\n"
+                    if card.rank == 'Joker': 
+                        joker_drawn = True
 
             sorted_players = sorted(players, key=lambda p: (
                 p.initiative_card.get_rank_value() if p.initiative_card else 0,
@@ -132,11 +152,11 @@ with col1:
             joker_log = ""
             if joker_drawn:
                 joker_log = "🃏 **Wild Cards +2 to trait/damage rolls!**\n♻️ Deck reshuffled."
-                deck.cards.extend(deck.discard_pile)
-                deck.discard_pile = []
-                deck.shuffle(silent=True)
+                current_deck.cards.extend(current_deck.discard_pile)
+                current_deck.discard_pile = []
+                current_deck.shuffle(silent=True)
             else:
-                deck.discard_pile.extend(cards_dealt)
+                current_deck.discard_pile.extend(cards_dealt)
 
             # Build Discord Embed
             embed = {
@@ -145,19 +165,16 @@ with col1:
                 "fields": [
                     {"name": "Initiative Order", "value": order_log, "inline": False}
                 ],
-                "footer": {"text": f"Deck: {deck.get_remaining_cards()} | Discard: {deck.get_discard_count()}"}
+                "footer": {"text": f"Deck: {current_deck.get_remaining_cards()} | Discard: {current_deck.get_discard_count()}"}
             }
             if joker_drawn:
                 embed["fields"].append({"name": "🚨 JOKER DRAWN!", "value": joker_log, "inline": False})
             
             send_discord_message(embed=embed)
             
-            # Show results on the website!
-            st.success("Round dealt and sent to Discord!")
-            st.markdown(f"### Round {rn} Results")
-            st.markdown(order_log)
-            if joker_drawn:
-                st.error("🚨 JOKER DRAWN! All Wild Cards +2. Deck Reshuffled.")
+            # Save results in session state so they display continuously on rerun
+            st.session_state.last_round_results = order_log
+            st.session_state.last_round_joker = joker_drawn
 
 with col2:
     if st.button("🔄 Manual Shuffle", use_container_width=True):
@@ -167,5 +184,12 @@ with col2:
         st.success("Deck shuffled!")
 
 with col3:
-    deck = st.session_state.deck
-    st.info(f"🃏 Deck: {deck.get_remaining_cards()} | ♻️ Discard: {deck.get_discard_count()}")
+    # Changed variable references directly to session state to prevent the AttributeError
+    st.info(f"🃏 Deck: {st.session_state.deck.get_remaining_cards()} | ♻️ Discard: {st.session_state.deck.get_discard_count()}")
+
+# Display round results persistently under the control buttons
+if 'last_round_results' in st.session_state:
+    st.markdown(f"### Round {st.session_state.round_counter} Results")
+    st.markdown(st.session_state.last_round_results)
+    if st.session_state.last_round_joker:
+        st.error("🚨 JOKER DRAWN! All Wild Cards +2. Deck Reshuffled.")
