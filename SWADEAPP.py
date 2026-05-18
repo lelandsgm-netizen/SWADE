@@ -18,6 +18,7 @@ def send_discord_message(message_content=None, username="SWADE Bot", embed=None)
     if embed:
         payload["embeds"] = [embed]
     try:
+        # Simple network fire-and-forget for smooth gameplay
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
     except:
         pass 
@@ -70,17 +71,6 @@ class Deck:
     def get_discard_count(self):
         return len(self.discard_pile)
 
-    def get_drawn_card_report(self):
-        report_lines = []
-        drawn_any = False
-        for card_str, count in self.drawn_cards_tracker.items():
-            if count > 0:
-                report_lines.append(f"- {card_str}: {count} time(s)")
-                drawn_any = True
-        if not drawn_any:
-            report_lines.append("No cards drawn yet.")
-        return "\n".join(report_lines)
-
 class Player:
     def __init__(self, name):
         self.name = name
@@ -104,7 +94,7 @@ with st.sidebar:
         if new_player and new_player not in [p.name for p in st.session_state.players]:
             st.session_state.players.append(Player(new_player))
             st.success(f"Added {new_player}!")
-            send_discord_message(f"👤 {new_player} joined the game!")
+            # REMOVED the individual Discord push here to prevent rate-limiting walls!
             st.rerun()
 
     if st.session_state.players:
@@ -123,13 +113,12 @@ with col1:
             st.error("Add at least one player first!")
         else:
             st.session_state.round_counter += 1
-            # Explicitly pulling deck from session state to ensure global scope
             current_deck = st.session_state.deck
             players = st.session_state.players
             rn = st.session_state.round_counter
             
             joker_drawn = False
-            draw_log, order_log = "", ""
+            order_log = ""
             cards_dealt = []
 
             for player in players:
@@ -137,7 +126,6 @@ with col1:
                 player.initiative_card = card
                 if card:
                     cards_dealt.append(card)
-                    draw_log += f"{player.name} drew: {card}\n"
                     if card.rank == 'Joker': 
                         joker_drawn = True
 
@@ -146,8 +134,9 @@ with col1:
                 p.initiative_card.get_suit_value() if p.initiative_card and p.initiative_card.rank != 'Joker' else 0
             ), reverse=True)
 
+            # Format as clean vertical lines
             for i, p in enumerate(sorted_players):
-                order_log += f"**{i+1}. {p.name}** ({p.initiative_card})\n"
+                order_log += f"**{i+1}. {p.name}** ({p.initiative_card})\n\n"
 
             joker_log = ""
             if joker_drawn:
@@ -172,7 +161,6 @@ with col1:
             
             send_discord_message(embed=embed)
             
-            # Save results in session state so they display continuously on rerun
             st.session_state.last_round_results = order_log
             st.session_state.last_round_joker = joker_drawn
 
@@ -184,10 +172,9 @@ with col2:
         st.success("Deck shuffled!")
 
 with col3:
-    # Changed variable references directly to session state to prevent the AttributeError
     st.info(f"🃏 Deck: {st.session_state.deck.get_remaining_cards()} | ♻️ Discard: {st.session_state.deck.get_discard_count()}")
 
-# Display round results persistently under the control buttons
+# Display round results persistently under control buttons
 if 'last_round_results' in st.session_state:
     st.markdown(f"### Round {st.session_state.round_counter} Results")
     st.markdown(st.session_state.last_round_results)
