@@ -5,8 +5,19 @@ import time
 from collections import defaultdict
 
 # --- Configuration ---
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
-RESHUFFLE_THRESHOLD = 10
+import streamlit as st
+import random
+import requests
+import time
+from collections import defaultdict
+
+# --- Configuration ---
+# This forces the app to look directly at the secure Streamlit Secrets panel
+if "DISCORD_WEBHOOK_URL" in st.secrets:
+    DISCORD_WEBHOOK_URL = st.secrets["DISCORD_WEBHOOK_URL"]
+else:
+    # Fallback to hardcoded string just in case
+    DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
 
 # --- Webhook Function ---
 def send_discord_message(message_content=None, username="SWADE Bot", embed=None):
