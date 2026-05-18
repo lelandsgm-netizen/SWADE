@@ -5,19 +5,14 @@ import time
 from collections import defaultdict
 
 # --- Configuration ---
-import streamlit as st
-import random
-import requests
-import time
-from collections import defaultdict
-
-# --- Configuration ---
-# This forces the app to look directly at the secure Streamlit Secrets panel
 if "DISCORD_WEBHOOK_URL" in st.secrets:
     DISCORD_WEBHOOK_URL = st.secrets["DISCORD_WEBHOOK_URL"]
 else:
     # Fallback to hardcoded string just in case
     DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
+
+# Re-adding the missing variable here!
+RESHUFFLE_THRESHOLD = 10
 
 # --- Webhook Function ---
 def send_discord_message(message_content=None, username="SWADE Bot", embed=None):
@@ -105,7 +100,6 @@ with st.sidebar:
         if new_player and new_player not in [p.name for p in st.session_state.players]:
             st.session_state.players.append(Player(new_player))
             st.success(f"Added {new_player}!")
-            # REMOVED the individual Discord push here to prevent rate-limiting walls!
             st.rerun()
 
     if st.session_state.players:
