@@ -14,14 +14,37 @@ else:
 local_storage = LocalStorage()
 
 # --- Webhook Transmission ---
-def send_discord_roll(embed):
+def send_discord_roll(embed, is_blind=False):
+    """Sends the roll to Discord unless Blind Roll is activated by the GM."""
+    if is_blind:
+        return True # Intercepted locally, do not transmit
     if not DISCORD_WEBHOOK_URL:
-        return
+        return False
     payload = {"username": "SWADE Dice Bot", "embeds": [embed]}
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+        return response.status_code == 204
     except:
-        pass
+        return False
+
+# --- Render Private GM Card Mirror ---
+def render_private_gm_card(embed):
+    """Draws a clean, styled visual replica of the Discord Rich Embed on screen for the GM."""
+    color_hex = f"#{embed['color']:06x}" if isinstance(embed['color'], int) else "#980724"
+    st.markdown(
+        f"""
+        <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 15px; border-radius: 4px; margin-top: 10px;">
+            <strong style="color: #b9bbbe; font-size: 12px; text-transform: uppercase;">{embed['author']['name']}</strong>
+            <h3 style="margin-top: 5px; margin-bottom: 15px; color: #ffffff;">{embed['title']}</h3>
+        """, 
+        unsafe_allow_html=True
+    )
+    for field in embed['fields']:
+        if field['inline']:
+            st.markdown(f"**{field['name']}**: {field['value']}", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='margin-top: 10px; padding: 5px; background: #2f3136; border-radius: 3px;'><strong>{field['name']}</strong><br>{field['value']}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # --- Core Rolling Logic ---
 def roll_single_die(sides):
@@ -152,7 +175,6 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
 st.title("🎲 SWADE Tactical Dice Console")
 
-# Secure safe fallbacks for Local Storage parameters across all 6 slots
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
 
 macro_data = {}
@@ -171,20 +193,21 @@ with col_macro:
     st.header("💾 Character Configuration")
     p_name = st.text_input("Character Name:", value=saved_name)
     
-    st.subheader("⚔️ Manage Attack Macros")
+    # PHASE 3: The Secret GM Shield Activation Control
+    gm_mode = st.checkbox("🔮 Activate GM Shield Mode", value=False, help="Unlocks blind rolling mechanics to bypass Discord.")
     
-    # Use clean tab layouts to keep 6 macros organized and slick
+    st.subheader("⚔️ Manage Attack Macros")
     tab1, tab2, tab3 = st.tabs(["Macros 1-2", "Macros 3-4", "Macros 5-6"])
     
     with tab1:
         st.markdown("**Slot #1**")
         m1_t = st.text_input("Title:", value=macro_data["t_1"], key="in_m1_t")
-        m1_f = st.text_input("Formula (e.g., 2d6):", value=macro_data["f_1"], key="in_m1_f", placeholder="2d6")
+        m1_f = st.text_input("Formula:", value=macro_data["f_1"], key="in_m1_f", placeholder="2d6")
         m1_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_1"], min_value=0, key="in_m1_ap")
         st.markdown("---")
         st.markdown("**Slot #2**")
         m2_t = st.text_input("Title:", value=macro_data["t_2"], key="in_m2_t")
-        m2_f = st.text_input("Formula (e.g., 1d10+1d6):", value=macro_data["f_2"], key="in_m2_f", placeholder="1d10+1d6")
+        m2_f = st.text_input("Formula:", value=macro_data["f_2"], key="in_m2_f", placeholder="1d10+1d6")
         m2_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_2"], min_value=0, key="in_m2_ap")
         
     with tab2:
@@ -211,36 +234,22 @@ with col_macro:
         
     if st.button("💾 Save Profile to This Device", use_container_width=True):
         local_storage.setItem("swade_player_name", p_name, key="save_st_name")
-        local_storage.setItem("swade_m1_t", m1_t, key="save_st_m1_t")
-        local_storage.setItem("swade_m1_f", m1_f, key="save_st_m1_f")
-        local_storage.setItem("swade_m1_ap", str(m1_ap), key="save_st_m1_ap")
-        
-        local_storage.setItem("swade_m2_t", m2_t, key="save_st_m2_t")
-        local_storage.setItem("swade_m2_f", m2_f, key="save_st_m2_f")
-        local_storage.setItem("swade_m2_ap", str(m2_ap), key="save_st_m2_ap")
-        
-        local_storage.setItem("swade_m3_t", m3_t, key="save_st_m3_t")
-        local_storage.setItem("swade_m3_f", m3_f, key="save_st_m3_f")
-        local_storage.setItem("swade_m3_ap", str(m3_ap), key="save_st_m3_ap")
-        
-        local_storage.setItem("swade_m4_t", m4_t, key="save_st_m4_t")
-        local_storage.setItem("swade_m4_f", m4_f, key="save_st_m4_f")
-        local_storage.setItem("swade_m4_ap", str(m4_ap), key="save_st_m4_ap")
-        
-        local_storage.setItem("swade_m5_t", m5_t, key="save_st_m5_t")
-        local_storage.setItem("swade_m5_f", m5_f, key="save_st_m5_f")
-        local_storage.setItem("swade_m5_ap", str(m5_ap), key="save_st_m5_ap")
-        
-        local_storage.setItem("swade_m6_t", m6_t, key="save_st_m6_t")
-        local_storage.setItem("swade_m6_f", m6_f, key="save_st_m6_f")
-        local_storage.setItem("swade_m6_ap", str(m6_ap), key="save_st_m6_ap")
-        
+        for idx, (t, f, ap) in enumerate([(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)], 1):
+            local_storage.setItem(f"swade_m{idx}_t", t, key=f"save_st_m{idx}_t")
+            local_storage.setItem(f"swade_m{idx}_f", f, key=f"save_st_m{idx}_f")
+            local_storage.setItem(f"swade_m{idx}_ap", str(ap), key=f"save_st_m{idx}_ap")
         st.success("All 6 macros saved! Refresh page to update shortcuts.")
 
 with col_main:
     st.header("🎯 Combat Weapon Macros")
     
-    # Dynamically map out quick-fire buttons for any active slots
+    # Show dynamic blind roll selector if GM mode is engaged
+    blind_roll = False
+    if gm_mode:
+        blind_roll = st.checkbox("🕵️ Blind Roll (Calculate locally, do NOT send to Discord)", value=False)
+        if blind_roll:
+            st.warning("Privacy Shield Active: Results will mirror below instead of going to chat.")
+
     grid_cols = st.columns(2)
     macro_slots = [(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), 
                    (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)]
@@ -252,8 +261,12 @@ with col_main:
                 if st.button(f"⚔️ Fire: {title} ({formula})", use_container_width=True, key=f"btn_run_{title}_{col_idx}"):
                     embed, total = execute_formula_damage_roll(p_name, formula, ap, macro_label=title)
                     if embed:
-                        send_discord_roll(embed)
-                        st.success(f"Dispatched **{total} Damage** to Discord.")
+                        send_discord_roll(embed, is_blind=blind_roll)
+                        if blind_roll:
+                            st.info("Private Result Calculated:")
+                            render_private_gm_card(embed)
+                        else:
+                            st.success(f"Dispatched **{total} Damage** to Discord.")
             col_idx += 1
             
     if col_idx == 0:
@@ -278,8 +291,12 @@ with col_main:
 
         if st.button("🎲 Fire Trait Test to Discord", type="primary", use_container_width=True):
             embed = execute_dropdown_trait_roll(p_name, die_choice, mod_choice, map_penalty, tn_choice)
-            send_discord_roll(embed)
-            st.success("Trait roll processed and dispatched to Discord!")
+            send_discord_roll(embed, is_blind=blind_roll)
+            if blind_roll:
+                st.info("Private Result Calculated:")
+                render_private_gm_card(embed)
+            else:
+                st.success("Trait roll processed and dispatched to Discord!")
 
     else:
         dice_input = st.text_input("Enter Damage Formula:", value="1d10+1d6")
@@ -290,5 +307,9 @@ with col_main:
             if embed is None:
                 st.error(total)
             else:
-                send_discord_roll(embed)
-                st.success(f"Damage roll sent! Total: **{total} Damage**")
+                send_discord_roll(embed, is_blind=blind_roll)
+                if blind_roll:
+                    st.info("Private Result Calculated:")
+                    render_private_gm_card(embed)
+                else:
+                    st.success(f"Damage roll sent! Total: **{total} Damage**")
