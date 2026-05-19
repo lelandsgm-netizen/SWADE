@@ -13,11 +13,14 @@ else:
 
 local_storage = LocalStorage()
 
+# Initialize Session State Memory for the In-App Roll Stream
+if "roll_history" not in st.session_state:
+    st.session_state.roll_history = []
+
 # --- Webhook Transmission ---
 def send_discord_roll(embed, is_blind=False):
-    """Sends the roll to Discord unless Blind Roll is activated by the GM."""
     if is_blind:
-        return True # Intercepted locally, do not transmit
+        return True 
     if not DISCORD_WEBHOOK_URL:
         return False
     payload = {"username": "SWADE Dice Bot", "embeds": [embed]}
@@ -26,25 +29,6 @@ def send_discord_roll(embed, is_blind=False):
         return response.status_code == 204
     except:
         return False
-
-# --- Render Private GM Card Mirror ---
-def render_private_gm_card(embed):
-    """Draws a clean, styled visual replica of the Discord Rich Embed on screen for the GM."""
-    color_hex = f"#{embed['color']:06x}" if isinstance(embed['color'], int) else "#980724"
-    st.markdown(
-        f"""
-        <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 15px; border-radius: 4px; margin-top: 10px;">
-            <strong style="color: #b9bbbe; font-size: 12px; text-transform: uppercase;">{embed['author']['name']}</strong>
-            <h3 style="margin-top: 5px; margin-bottom: 15px; color: #ffffff;">{embed['title']}</h3>
-        """, 
-        unsafe_allow_html=True
-    )
-    for field in embed['fields']:
-        if field['inline']:
-            st.markdown(f"**{field['name']}**: {field['value']}", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div style='margin-top: 10px; padding: 5px; background: #2f3136; border-radius: 3px;'><strong>{field['name']}</strong><br>{field['value']}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # --- Core Rolling Logic ---
 def roll_single_die(sides):
@@ -171,6 +155,31 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     }
     return embed, final_total
 
+def render_stream_card(embed, is_blind=False):
+    """Draws a beautifully packaged visual replica of the roll outcome on the website."""
+    color_hex = f"#{embed['color']:06x}" if isinstance(embed['color'], int) else "#980724"
+    blind_tag = " <span style='background-color:#5865f2; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>🕵️ BLIND</span>" if is_blind else ""
+    
+    st.markdown(
+        f"""
+        <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 15px; border-radius: 4px; margin-bottom: 12px; font-family: sans-serif;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <strong style="color: #b9bbbe; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">{embed['author']['name']}</strong>
+                {blind_tag}
+            </div>
+            <h4 style="margin-top: 4px; margin-bottom: 10px; color: #ffffff; font-size: 16px;">{embed['title']}</h4>
+        """, 
+        unsafe_allow_html=True
+    )
+    
+    # Render fields elegantly
+    for field in embed['fields']:
+        if field['inline']:
+            st.markdown(f"<span style='color:#b9bbbe;'>{field['name']}:</span> <span style='color:#ffffff;'>{field['value']}</span>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='margin-top: 6px; padding: 6px; background: #2f3136; border-radius: 3px; color:#ffffff;'><strong>{field['name']}</strong><br>{field['value']}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # --- Web UI Interface Layout ---
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
 st.title("🎲 SWADE Tactical Dice Console")
@@ -192,9 +201,7 @@ col_main, col_macro = st.columns([2, 1])
 with col_macro:
     st.header("💾 Character Configuration")
     p_name = st.text_input("Character Name:", value=saved_name)
-    
-    # PHASE 3: The Secret GM Shield Activation Control
-    gm_mode = st.checkbox("🔮 Activate GM Shield Mode", value=False, help="Unlocks blind rolling mechanics to bypass Discord.")
+    gm_mode = st.checkbox("🔮 Activate GM Shield Mode", value=False)
     
     st.subheader("⚔️ Manage Attack Macros")
     tab1, tab2, tab3 = st.tabs(["Macros 1-2", "Macros 3-4", "Macros 5-6"])
@@ -243,12 +250,11 @@ with col_macro:
 with col_main:
     st.header("🎯 Combat Weapon Macros")
     
-    # Show dynamic blind roll selector if GM mode is engaged
     blind_roll = False
     if gm_mode:
         blind_roll = st.checkbox("🕵️ Blind Roll (Calculate locally, do NOT send to Discord)", value=False)
         if blind_roll:
-            st.warning("Privacy Shield Active: Results will mirror below instead of going to chat.")
+            st.warning("Privacy Shield Active: Results will stream below in secret.")
 
     grid_cols = st.columns(2)
     macro_slots = [(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), 
@@ -262,15 +268,12 @@ with col_main:
                     embed, total = execute_formula_damage_roll(p_name, formula, ap, macro_label=title)
                     if embed:
                         send_discord_roll(embed, is_blind=blind_roll)
-                        if blind_roll:
-                            st.info("Private Result Calculated:")
-                            render_private_gm_card(embed)
-                        else:
-                            st.success(f"Dispatched **{total} Damage** to Discord.")
+                        # Prepend to memory history log
+                        st.session_state.roll_history.insert(0, (embed, blind_roll))
             col_idx += 1
             
     if col_idx == 0:
-        st.info("No weapon macros active yet. Configure slots on the right panel to generate shortcut buttons!")
+        st.info("No weapon macros active yet.")
 
     st.markdown("---")
     st.markdown("### Manual Dashboard Override")
@@ -289,14 +292,11 @@ with col_main:
         map_penalty = 0 if action_intent == 1 else (-2 if action_intent == 2 else -4)
         tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
 
-        if st.button("🎲 Fire Trait Test to Discord", type="primary", use_container_width=True):
+        # PATCHED: Button string text changed cleanly to "Make Trait Roll"
+        if st.button("🎲 Make Trait Roll", type="primary", use_container_width=True):
             embed = execute_dropdown_trait_roll(p_name, die_choice, mod_choice, map_penalty, tn_choice)
             send_discord_roll(embed, is_blind=blind_roll)
-            if blind_roll:
-                st.info("Private Result Calculated:")
-                render_private_gm_card(embed)
-            else:
-                st.success("Trait roll processed and dispatched to Discord!")
+            st.session_state.roll_history.insert(0, (embed, blind_roll))
 
     else:
         dice_input = st.text_input("Enter Damage Formula:", value="1d10+1d6")
@@ -308,8 +308,19 @@ with col_main:
                 st.error(total)
             else:
                 send_discord_roll(embed, is_blind=blind_roll)
-                if blind_roll:
-                    st.info("Private Result Calculated:")
-                    render_private_gm_card(embed)
-                else:
-                    st.success(f"Damage roll sent! Total: **{total} Damage**")
+                st.session_state.roll_history.insert(0, (embed, blind_roll))
+
+    # --- THE LIVE IN-APP ROLL LOG STREAM ---
+    st.markdown("---")
+    st.subheader("📜 Live Action Roll Log")
+    
+    if st.session_state.roll_history:
+        if st.button("🗑️ Clear Log History", use_container_width=False):
+            st.session_state.roll_history = []
+            st.rerun()
+            
+        # Streams out rolls continuously down the page, stacked newest-first
+        for hist_embed, hist_blind in st.session_state.roll_history:
+            render_stream_card(hist_embed, is_blind=hist_blind)
+    else:
+        st.caption("Waiting for dice hits... Active rolls will instantly stream here.")
