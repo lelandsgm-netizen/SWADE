@@ -1,7 +1,7 @@
 import streamlit as st
 import random
 import requests
-from collections import defaultdict
+import re
 
 # --- Configuration ---
 if "DISCORD_WEBHOOK_URL" in st.secrets:
@@ -31,41 +31,101 @@ def roll_single_die(sides):
         break
     return rolls
 
-def execute_swade_roll(player_name, die_sides, is_trait=True, modifier=0, target_number=4):
-    """Executes a full SWADE roll calculation with explosion trails."""
-    # 1. Roll Trait Die
-    trait_rolls = roll_single_die(die_sides)
-    trait_total = sum(trait_rolls)
+def parse_dice_string(dice_string):
+    """Parses complex strings like '1d10+1d6+2' or '2d6' into components."""
+    # Clean up spaces
+    cleaned = dice_string.lower().replace(" ", "")
     
-    # 2. Format Trait Visual Trail
-    trait_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in trait_rolls])
+    # Find all dice expressions (e.g., '1d10', '2d6')
+    dice_matches = re.findall(r'([+-]?\d*)d(\d+)', cleaned)
     
+    # Remove the dice parts to see what flat modifiers are left
+    remainder = re.sub(r'([+-]?\d*)d(\d+)', '', cleaned)
+    
+    # Calculate final flat modifier
+    modifier = 0
+    if remainder:
+        # Find all trailing numbers with signs
+        mod_matches = re.findall(r'([+-]?\d+)', remainder)
+        for mod in mod_matches:
+            modifier += int(mod)
+            
+    dice_to_roll = []
+    for count_str, sides_str in dice_matches:
+        # Default to 1 die if count is omitted (e.g., 'd6' instead of '1d6')
+        count = 1
+        if count_str and count_str != '+' and count_str != '-':
+            count = int(count_str)
+        elif count_str == '-':
+            count = -1
+            
+        sides = int(sides_str)
+        dice_to_roll.append((count, sides))
+        
+    return dice_to_roll, modifier
+
+def execute_complex_roll(player_name, dice_input, is_trait=True, target_number=4):
+    """Executes a parsed multi-dice rolling calculation."""
+    try:
+        dice_to_roll, global_modifier = parse_dice_string(dice_input)
+    except:
+        return None, "Error parsing dice string. Make sure it looks like '1d10+1d6+2'!"
+
+    if not dice_to_roll and global_modifier == 0:
+        return None, "Invalid formula! Enter something like '2d6' or 'd8+2'."
+
+    fields_log = []
+    highest_trait_total = 0
+    damage_grand_total = 0
+    all_snakes_eyes = True  # Track for potential critical failure
+    
+    # --- Execute All Dice Pools ---
+    for count, sides in dice_to_roll:
+        for _ in range(abs(count)):
+            rolls = roll_single_die(sides)
+            total = sum(rolls)
+            trail = " -> ".join([f"[{r}]" if r != sides else f"[{r}]💥" for r in rolls])
+            
+            # If any single die roll isn't a 1, we can't critical fail
+            if rolls[0] != 1:
+                all_snakes_eyes = False
+                
+            if is_trait:
+                # In trait mode, we track the highest single exploding die pool
+                if total > highest_trait_total:
+                    highest_trait_total = total
+                fields_log.append({"name": f"🎲 Trait Die (d{sides})", "value": f"{trail} = **{total}**", "inline": True})
+            else:
+                # In damage mode, we add everything together directly
+                damage_grand_total += total
+                fields_log.append({"name": f"⚔️ Damage Die (d{sides})", "value": f"{trail} = **{total}**", "inline": True})
+
+    # --- Handle Wild Die for Trait Tests ---
     wild_total = 0
-    wild_trail = ""
-    
-    # 3. Roll Wild Die if it's a Trait Test
     if is_trait:
         wild_rolls = roll_single_die(6)
         wild_total = sum(wild_rolls)
         wild_trail = " -> ".join([f"[{r}]" if r != 6 else f"[{r}]💥" for r in wild_rolls])
         
-        # Determine Higher Die
-        final_die_total = max(trait_total, wild_total)
-        chosen_type = "Trait Die" if trait_total >= wild_total else "Wild Die"
-    else:
-        # Damage Roll Mode (Add everything together)
-        final_die_total = trait_total
-        chosen_type = "Damage Roll"
+        if wild_rolls[0] != 1:
+            all_snakes_eyes = False
+            
+        fields_log.append({"name": "🃏 Wild Die (d6)", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
         
-    # 4. Apply Flat Modifiers
-    final_total = final_die_total + modifier
+        final_die_base = max(highest_trait_total, wild_total)
+    else:
+        final_die_base = damage_grand_total
+        all_snakes_eyes = False # Damage rolls cannot critical fail in SWADE
+
+    # --- Final Math Calculation ---
+    final_total = final_die_base + global_modifier
+    mod_sign = f"+{global_modifier}" if global_modifier >= 0 else f"{global_modifier}"
     
-    # 5. Calculate Success & Raises
+    # --- Resolution Status Checking ---
     result_text = ""
     embed_color = 9807243  # Default Grey
     
-    # Check for Critical Failure (Snake Eyes on Trait + Wild)
-    if is_trait and trait_rolls[0] == 1 and wild_rolls[0] == 1:
+    if is_trait and all_snakes_eyes and dice_to_roll:
         result_text = "💀 CRITICAL FAILURE! 💀"
         embed_color = 15158332  # Red
     else:
@@ -82,67 +142,48 @@ def execute_swade_roll(player_name, die_sides, is_trait=True, modifier=0, target
                 result_text = f"🔥 Success with {raises} Raise(s)!"
                 embed_color = 15105570  # Gold/Orange
 
-    # 6. Build the Discord Embed Card Layout
-    mod_sign = f"+{modifier}" if modifier >= 0 else f"{modifier}"
-    title_mode = f"📊 Trait Test: d{die_sides} ({mod_sign})" if is_trait else f"⚔️ Damage Roll: d{die_sides} ({mod_sign})"
+    # --- Build the Payload ---
+    title_mode = f"📊 Trait Roll: {dice_input}" if is_trait else f"💥 Damage Roll: {dice_input}"
     
     embed = {
         "title": title_mode,
         "author": {"name": player_name.upper()},
         "color": embed_color,
-        "fields": [
-            {"name": "🎲 Trait Die Result", "value": f"{trait_trail} = **{trait_total}**", "inline": True}
-        ]
+        "fields": fields_log
     }
     
+    # Add summary block
     if is_trait:
-        embed["fields"].append({"name": "🃏 Wild Die (d6)", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
-        embed["fields"].append({"name": "📈 Math Breakdown", "value": f"Higher Die ({final_die_total}) {mod_sign} = **{final_total}**", "inline": False})
+        embed["fields"].append({"name": "📈 Math Breakdown", "value": f"Higher Die ({final_die_base}) {mod_sign} = **{final_total}**", "inline": False})
     else:
-        embed["fields"].append({"name": "📈 Math Breakdown", "value": f"Total ({final_die_total}) {mod_sign} = **{final_total}**", "inline": False})
+        embed["fields"].append({"name": "📈 Math Breakdown", "value": f"Total ({final_die_base}) {mod_sign} = **{final_total}**", "inline": False})
         
     embed["fields"].append({"name": "📢 Resolution", "value": f"**{result_text}** (vs TN {target_number})", "inline": False})
     
-    return embed, result_text, trait_trail, wild_trail, final_total
+    return embed, result_text, final_total
 
 # --- Web UI Interface Layout ---
-st.set_page_config(page_title="SWADE Dice Roller", page_icon="🎲")
-st.title("🎲 SWADE Dice Engine")
+st.set_page_config(page_title="SWADE Multi-Dice Roller", page_icon="🎲")
+st.title("🎲 SWADE Advanced Dice Console")
 
-# App Navigation / Toggle Mode
-app_mode = st.radio("Choose App Tool:", ["🃏 Initiative Tracker (Active)", "🎲 Dice Roller Sandbox (Testing)"])
+p_name = st.text_input("Character Name:", value="Hero")
 
-if app_mode == "🃏 Initiative Tracker (Active)":
-    st.info("Your primary initiative code is running perfectly backgrounded. Switch to the Dice Roller Sandbox radio button above to test out Phase 1 of our new mechanics!")
-else:
-    st.subheader("Experimental Dice Console")
+# Upgraded input block to accept clean text string formulas
+dice_input = st.text_input("Enter Roll Formula (e.g., d8, 2d6, 1d10+1d6+2):", value="1d10+1d6")
+
+roll_type = st.checkbox("Is this a Trait Test? (Uncheck for weapon/spell Damage Rolls)", value=False)
+tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
+
+if st.button("🎲 Fire Complex Roll to Discord", type="primary", use_container_width=True):
+    embed, err_or_res, total = execute_complex_roll(
+        player_name=p_name,
+        dice_input=dice_input,
+        is_trait=roll_type,
+        target_number=tn_choice
+    )
     
-    # Input Block Configuration
-    p_name = st.text_input("Character Name:", value="Hero")
-    
-    col_d, col_m = st.columns(2)
-    with col_d:
-        die_choice = st.selectbox("Select Trait Die:", [4, 6, 8, 10, 12], index=2)
-    with col_m:
-        mod_choice = st.number_input("Flat Modifier (+/-):", value=0, step=1)
-        
-    roll_type = st.checkbox("Is this a Trait Test? (Uncheck for pure Damage Rolls)", value=True)
-    tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
-
-    if st.button("🎲 Fire Roll to Discord", type="primary", use_container_width=True):
-        embed, res, t_trail, w_trail, total = execute_swade_roll(
-            player_name=p_name, 
-            die_sides=die_choice, 
-            is_trait=roll_type, 
-            modifier=mod_choice, 
-            target_number=tn_choice
-        )
-        
-        # Send data to Discord
+    if embed is None:
+        st.error(err_or_res)
+    else:
         send_discord_roll(embed)
-        
-        # Render visual outcome confirmation box directly on screen
-        st.success(f"Roll dispatched successfully! Result: {total} ({res})")
-        st.markdown(f"**Your Trait Trail:** {t_trail}")
-        if roll_type:
-            st.markdown(f"**Your Wild Trail:** {w_trail}")
+        st.success(f"Roll processed! Sent total of **{total}** ({err_or_res}) to Discord.")
