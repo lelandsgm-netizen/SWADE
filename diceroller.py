@@ -13,7 +13,6 @@ else:
 
 local_storage = LocalStorage()
 
-# Initialize Session State Memory for the In-App Roll Stream
 if "roll_history" not in st.session_state:
     st.session_state.roll_history = []
 
@@ -143,9 +142,9 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     fields_log.append({"name": "📈 Math Breakdown", "value": f"Total ({damage_grand_total}) {mod_sign} = **{final_total}**", "inline": False})
     fields_log.append({"name": "📢 Summary", "value": f"💥 **{final_total} Damage**{ap_suffix}", "inline": False})
     
-    title_text = f"⚔️ Damage Roll: {dice_input}"
+    title_text = f"Damage Roll: {dice_input}"
     if macro_label:
-        title_text = f"⚔️ {macro_label} | {title_text}"
+        title_text = f"{macro_label} | {title_text}"
 
     embed = {
         "title": title_text,
@@ -155,30 +154,49 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     }
     return embed, final_total
 
+# --- 🎨 UPGRADED IN-APP STREAM RENDERING ENGINE ---
 def render_stream_card(embed, is_blind=False):
-    """Draws a beautifully packaged visual replica of the roll outcome on the website."""
+    """Draws a flawless, leak-free, custom-styled digital index card on the dashboard."""
     color_hex = f"#{embed['color']:06x}" if isinstance(embed['color'], int) else "#980724"
-    blind_tag = " <span style='background-color:#5865f2; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>🕵️ BLIND</span>" if is_blind else ""
+    blind_badge = " <span style='background-color:#5865f2; font-size:11px; padding:3px 6px; border-radius:3px; font-weight:bold; color:white; margin-left:10px;'>🕵️ BLIND</span>" if is_blind else ""
     
-    st.markdown(
-        f"""
-        <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 15px; border-radius: 4px; margin-bottom: 12px; font-family: sans-serif;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong style="color: #b9bbbe; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">{embed['author']['name']}</strong>
-                {blind_tag}
-            </div>
-            <h4 style="margin-top: 4px; margin-bottom: 10px; color: #ffffff; font-size: 16px;">{embed['title']}</h4>
-        """, 
-        unsafe_allow_html=True
-    )
+    # 1. Open Card Framework Container
+    html_str = f"""
+    <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 16px; border-radius: 4px; margin-bottom: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <strong style="color: #b9bbbe; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;">{embed['author']['name']}</strong>
+            {blind_badge}
+        </div>
+        <h4 style="margin: 0 0 12px 0; color: #ffffff; font-size: 16px; font-weight: 600;">{embed['title']}</h4>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+    """
     
-    # Render fields elegantly
+    # 2. Append Content Fields Smoothly
     for field in embed['fields']:
+        # Strip markdown bold formatting indicators out to cleanly process raw textual content
+        clean_val = field['value'].replace("**", "")
+        
         if field['inline']:
-            st.markdown(f"<span style='color:#b9bbbe;'>{field['name']}:</span> <span style='color:#ffffff;'>{field['value']}</span>", unsafe_allow_html=True)
+            # Render side-by-side attributes dynamically
+            html_str += f"""
+            <div style="font-size: 14px; color: #dcddde;">
+                <span style="color: #8e9297; font-weight: 500;">{field['name']}:</span> {clean_val}
+            </div>
+            """
         else:
-            st.markdown(f"<div style='margin-top: 6px; padding: 6px; background: #2f3136; border-radius: 3px; color:#ffffff;'><strong>{field['name']}</strong><br>{field['value']}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+            # Render block summaries cleanly
+            html_str += f"""
+            <div style="margin-top: 4px; padding: 10px; background-color: #2f3136; border-radius: 4px; border: 1px solid #202225;">
+                <div style="color: #8e9297; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">{field['name']}</div>
+                <div style="color: #ffffff; font-size: 14px; font-weight: 500;">{clean_val}</div>
+            </div>
+            """
+            
+    # 3. Securely Close HTML Tag Tree
+    html_str += "</div></div>"
+    
+    # Render unified package down to container
+    st.markdown(html_str, unsafe_allow_html=True)
 
 # --- Web UI Interface Layout ---
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
@@ -268,7 +286,6 @@ with col_main:
                     embed, total = execute_formula_damage_roll(p_name, formula, ap, macro_label=title)
                     if embed:
                         send_discord_roll(embed, is_blind=blind_roll)
-                        # Prepend to memory history log
                         st.session_state.roll_history.insert(0, (embed, blind_roll))
             col_idx += 1
             
@@ -292,7 +309,6 @@ with col_main:
         map_penalty = 0 if action_intent == 1 else (-2 if action_intent == 2 else -4)
         tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
 
-        # PATCHED: Button string text changed cleanly to "Make Trait Roll"
         if st.button("🎲 Make Trait Roll", type="primary", use_container_width=True):
             embed = execute_dropdown_trait_roll(p_name, die_choice, mod_choice, map_penalty, tn_choice)
             send_discord_roll(embed, is_blind=blind_roll)
@@ -319,7 +335,6 @@ with col_main:
             st.session_state.roll_history = []
             st.rerun()
             
-        # Streams out rolls continuously down the page, stacked newest-first
         for hist_embed, hist_blind in st.session_state.roll_history:
             render_stream_card(hist_embed, is_blind=hist_blind)
     else:
