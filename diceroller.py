@@ -72,43 +72,99 @@ def calculate_resolution(total, tn):
         return ("🎯 Success!" if raises == 0 else f"🔥 Success with {raises} Raise(s)!"), (3066993 if raises == 0 else 15105570)
 
 # --- Processing Engines ---
-def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_penalty, target_number):
+def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_penalty, target_number, is_frenzy=False):
+    """Executes a standard or Frenzy-enabled SWADE Trait Test combining situational modifiers and Multi-Action Penalties."""
     fields_log = []
     total_modifier = situational_mod + map_penalty
     mod_sign = f"+{total_modifier}" if total_modifier >= 0 else f"{total_modifier}"
     
-    trait_rolls = roll_single_die(die_sides)
-    trait_total = sum(trait_rolls)
-    trait_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in trait_rolls])
-    
+    # 1. Roll the Shared Wild Die
     wild_rolls = roll_single_die(6)
     wild_total = sum(wild_rolls)
     wild_trail = " -> ".join([f"[{r}]" if r != 6 else f"[{r}]💥" for r in wild_rolls])
     
-    fields_log.append({"name": f"🎲 Trait Die (d{die_sides})", "value": f"{trait_trail} = **{trait_total}**", "inline": True})
-    fields_log.append({"name": "🃏 Wild Die (d6)", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
-    
-    if trait_rolls[0] == 1 and wild_rolls[0] == 1:
-        res_text, color = "💀 CRITICAL FAILURE! 💀", 15158332
-        base_die = 0
-        final_total = 0
-    else:
-        base_die = max(trait_total, wild_total)
-        final_total = base_die + total_modifier
-        res_text, color = calculate_resolution(final_total, target_number)
+    if not is_frenzy:
+        # Standard Single Attack Logic
+        trait_rolls = roll_single_die(die_sides)
+        trait_total = sum(trait_rolls)
+        trait_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in trait_rolls])
         
-    breakdown_text = f"Highest Die ({base_die})"
-    if situational_mod != 0:
-        breakdown_text += f" + Sit Mod ({situational_mod})"
-    if map_penalty != 0:
-        breakdown_text += f" + MAP Penalty ({map_penalty})"
-    breakdown_text += f" = **{final_total}**"
-    
-    fields_log.append({"name": "📈 Math Breakdown", "value": breakdown_text, "inline": False})
-    fields_log.append({"name": "📢 Resolution", "value": f"**{res_text}** (vs TN {target_number})", "inline": False})
+        fields_log.append({"name": f"🎲 Trait Die (d{die_sides})", "value": f"{trait_trail} = **{trait_total}**", "inline": True})
+        fields_log.append({"name": "🃏 Wild Die (d6)", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
+        
+        if trait_rolls[0] == 1 and wild_rolls[0] == 1:
+            res_text, color = "💀 CRITICAL FAILURE! 💀", 15158332
+            base_die = 0
+            final_total = 0
+        else:
+            base_die = max(trait_total, wild_total)
+            final_total = base_die + total_modifier
+            res_text, color = calculate_resolution(final_total, target_number)
+            
+        breakdown_text = f"Highest Die ({base_die})"
+        if situational_mod != 0:
+            breakdown_text += f" + Sit Mod ({situational_mod})"
+        if map_penalty != 0:
+            breakdown_text += f" + MAP Penalty ({map_penalty})"
+        breakdown_text += f" = **{final_total}**"
+        
+        fields_log.append({"name": "📈 Math Breakdown", "value": breakdown_text, "inline": False})
+        fields_log.append({"name": "📢 Resolution", "value": f"**{res_text}** (vs TN {target_number})", "inline": False})
+        title_text = f"📊 Trait Test: d{die_sides} (Net Mod: {mod_sign})"
+        
+    else:
+        # True SWADE Frenzy Multi-Attack Logic RESTORED
+        t1_rolls = roll_single_die(die_sides)
+        t1_total = sum(t1_rolls)
+        t1_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in t1_rolls])
+        
+        t2_rolls = roll_single_die(die_sides)
+        t2_total = sum(t2_rolls)
+        t2_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in t2_rolls])
+        
+        fields_log.append({"name": "⚔️ Attack Die #1", "value": f"{t1_trail} = **{t1_total}**", "inline": True})
+        fields_log.append({"name": "⚔️ Attack Die #2", "value": f"{t2_trail} = **{t2_total}**", "inline": True})
+        fields_log.append({"name": "🃏 Shared Wild Die", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
+        
+        if t1_rolls[0] == 1 and t2_rolls[0] == 1 and wild_rolls[0] == 1:
+            fields_log.append({"name": "🚨 COMBAT DISASTER", "value": "💀 **CRITICAL FAILURE ON BOTH ATTACKS!** 💀", "inline": False})
+            color = 15158332
+        else:
+            pairs_a = [t1_total, t2_total]
+            pairs_b = [wild_total, t2_total]
+            pairs_c = [t1_total, wild_total]
+            
+            best_combo = max([pairs_a, pairs_b, pairs_c], key=lambda x: (sum(x), max(x)))
+            
+            final_atk1 = best_combo[0] + total_modifier
+            final_atk2 = best_combo[1] + total_modifier
+            
+            res1, _ = calculate_resolution(final_atk1, target_number)
+            res2, _ = calculate_resolution(final_atk2, target_number)
+            
+            # Transparency log for tracking the penalty breakdown
+            penalty_breakdown = ""
+            if situational_mod != 0:
+                penalty_breakdown += f" + Sit Mod ({situational_mod})"
+            if map_penalty != 0:
+                penalty_breakdown += f" + MAP Penalty ({map_penalty})"
 
+            fields_log.append({
+                "name": "⚔️ Attack #1 Outcome", 
+                "value": f"Base ({best_combo[0]}){penalty_breakdown} = **{final_atk1}**\n↳ **{res1}**", 
+                "inline": False
+            })
+            fields_log.append({
+                "name": "⚔️ Attack #2 Outcome", 
+                "value": f"Base ({best_combo[1]}){penalty_breakdown} = **{final_atk2}**\n↳ **{res2}**", 
+                "inline": False
+            })
+            color = 15105570
+            
+        title_text = f"⚔️ Frenzy Full Attack: 2x d{die_sides} (Net Mod: {mod_sign})"
+        
     embed = {
-        "title": f"📊 Trait Test: d{die_sides} (Net Mod: {mod_sign})",
+        "title": title_text,
         "author": {"name": player_name.upper()},
         "color": color,
         "fields": fields_log
@@ -154,25 +210,18 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     }
     return embed, final_total
 
-# --- 🎨 FIX: THE LEAK-PROOF RENDERING ENGINE ---
 def render_stream_card(embed, is_blind=False):
-    """Uses native containers to cleanly frame rolls without leaking raw code string attributes."""
     blind_suffix = " 🕵️ [BLIND ROLL]" if is_blind else ""
-    
-    # Render header info neatly via structured markdowns
     st.markdown(f"### {embed['title']}{blind_suffix}")
     st.caption(f"**CHARACTER:** {embed['author']['name']}")
     
-    # Open up an isolated visual container box
     with st.container(border=True):
         for field in embed['fields']:
             if field['inline']:
-                # Print clean, single-line stats side-by-side
                 st.write(f"**{field['name']}**: {field['value']}")
             else:
-                # Group block breakdowns and outcome summaries into clean emphasis boxes
                 st.info(f"**{field['name']}**\n\n{field['value']}")
-    st.markdown(" ") # Spacer
+    st.markdown(" ")
 
 # --- Web UI Interface Layout ---
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
@@ -283,10 +332,14 @@ with col_main:
                                          format_func=lambda x: f"{x} Action ('0' Penalty)" if x == 1 else (f"{x} Actions ('-2' Penalty)" if x == 2 else f"{x} Actions ('-4' Penalty)"))
             
         map_penalty = 0 if action_intent == 1 else (-2 if action_intent == 2 else -4)
+        
+        # RESTORED: Dedicated toggle element allowing Frenzy attacks inside any turning context
+        frenzy_selection = st.checkbox("Apply Frenzy Edge? (2x Attacks via 1 Shared Wild Die)", value=False)
+        
         tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
 
         if st.button("🎲 Make Trait Roll", type="primary", use_container_width=True):
-            embed = execute_dropdown_trait_roll(p_name, die_choice, mod_choice, map_penalty, tn_choice)
+            embed = execute_dropdown_trait_roll(p_name, die_choice, mod_choice, map_penalty, tn_choice, is_frenzy=frenzy_selection)
             send_discord_roll(embed, is_blind=blind_roll)
             st.session_state.roll_history.insert(0, (embed, blind_roll))
 
