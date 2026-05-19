@@ -11,6 +11,7 @@ if "DISCORD_WEBHOOK_URL" in st.secrets:
 else:
     DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
 
+# Initialize Local Storage Connector
 local_storage = LocalStorage()
 
 # --- Webhook Transmission ---
@@ -67,19 +68,14 @@ def calculate_resolution(total, tn):
 
 # --- Processing Engines ---
 def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_penalty, target_number):
-    """Executes a standard SWADE Trait Test combining situational modifiers and Multi-Action Penalties."""
     fields_log = []
-    
-    # Calculate net total modifier
     total_modifier = situational_mod + map_penalty
     mod_sign = f"+{total_modifier}" if total_modifier >= 0 else f"{total_modifier}"
     
-    # 1. Roll Trait Die
     trait_rolls = roll_single_die(die_sides)
     trait_total = sum(trait_rolls)
     trait_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in trait_rolls])
     
-    # 2. Roll Wild Die
     wild_rolls = roll_single_die(6)
     wild_total = sum(wild_rolls)
     wild_trail = " -> ".join([f"[{r}]" if r != 6 else f"[{r}]💥" for r in wild_rolls])
@@ -87,7 +83,6 @@ def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_pen
     fields_log.append({"name": f"🎲 Trait Die (d{die_sides})", "value": f"{trait_trail} = **{trait_total}**", "inline": True})
     fields_log.append({"name": "🃏 Wild Die (d6)", "value": f"{wild_trail} = **{wild_total}**", "inline": True})
     
-    # Evaluate Critical Failure (Snake Eyes)
     if trait_rolls[0] == 1 and wild_rolls[0] == 1:
         res_text, color = "💀 CRITICAL FAILURE! 💀", 15158332
         base_die = 0
@@ -97,7 +92,6 @@ def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_pen
         final_total = base_die + total_modifier
         res_text, color = calculate_resolution(final_total, target_number)
         
-    # Build transparent math breakdown for the GM
     breakdown_text = f"Highest Die ({base_die})"
     if situational_mod != 0:
         breakdown_text += f" + Sit Mod ({situational_mod})"
@@ -159,6 +153,7 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
 st.title("🎲 SWADE Tactical Dice Console")
 
+# Secure safe fallbacks for Local Storage context parameters
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
 saved_macro_1 = local_storage.getItem("swade_macro_1") or ""
 saved_macro_2 = local_storage.getItem("swade_macro_2") or ""
@@ -180,10 +175,11 @@ with col_macro:
     m2_ap = st.number_input("Macro 2 AP:", value=0, min_value=0, key="m2_ap")
     
     if st.button("💾 Save Settings to This Device", use_container_width=True):
-        local_storage.setItem("swade_player_name", p_name)
-        local_storage.setItem("swade_macro_1", m1_val)
-        local_storage.setItem("swade_macro_2", m2_val)
-        st.success("Profile updated! Refresh to lock.")
+        # PATCHED: Explicit contextual isolation keys added to prevent engine element collisions
+        local_storage.setItem("swade_player_name", p_name, key="save_storage_name")
+        local_storage.setItem("swade_macro_1", m1_val, key="save_storage_m1")
+        local_storage.setItem("swade_macro_2", m2_val, key="save_storage_m2")
+        st.success("Profile updated securely! Refresh the window to verify parameters.")
 
 with col_main:
     st.header("🎯 Active Battlefield Console")
@@ -210,13 +206,11 @@ with col_main:
         with col_d:
             die_choice = st.selectbox("Select Trait Die:", [4, 6, 8, 10, 12], index=2, format_func=lambda x: f"d{x}")
         with col_m:
-            mod_choice = st.number_input("Bonuses / Cover Modifiers:", value=0, step=1, help="Range, cover, wounds, or lighting modifiers")
+            mod_choice = st.number_input("Bonuses / Cover Modifiers:", value=0, step=1)
         with col_a:
-            # Dropdown tracking the declared intent of actions for penalty adjustment
             action_intent = st.selectbox("Declared Actions This Turn:", [1, 2, 3], index=0, 
                                          format_func=lambda x: f"{x} Action ('0' Penalty)" if x == 1 else (f"{x} Actions ('-2' Penalty)" if x == 2 else f"{x} Actions ('-4' Penalty)"))
             
-        # Map choice integer configuration
         map_penalty = 0 if action_intent == 1 else (-2 if action_intent == 2 else -4)
         tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
 
