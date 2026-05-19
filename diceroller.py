@@ -154,49 +154,25 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     }
     return embed, final_total
 
-# --- 🎨 UPGRADED IN-APP STREAM RENDERING ENGINE ---
+# --- 🎨 FIX: THE LEAK-PROOF RENDERING ENGINE ---
 def render_stream_card(embed, is_blind=False):
-    """Draws a flawless, leak-free, custom-styled digital index card on the dashboard."""
-    color_hex = f"#{embed['color']:06x}" if isinstance(embed['color'], int) else "#980724"
-    blind_badge = " <span style='background-color:#5865f2; font-size:11px; padding:3px 6px; border-radius:3px; font-weight:bold; color:white; margin-left:10px;'>🕵️ BLIND</span>" if is_blind else ""
+    """Uses native containers to cleanly frame rolls without leaking raw code string attributes."""
+    blind_suffix = " 🕵️ [BLIND ROLL]" if is_blind else ""
     
-    # 1. Open Card Framework Container
-    html_str = f"""
-    <div style="border-left: 5px solid {color_hex}; background-color: #1e1e24; padding: 16px; border-radius: 4px; margin-bottom: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong style="color: #b9bbbe; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;">{embed['author']['name']}</strong>
-            {blind_badge}
-        </div>
-        <h4 style="margin: 0 0 12px 0; color: #ffffff; font-size: 16px; font-weight: 600;">{embed['title']}</h4>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-    """
+    # Render header info neatly via structured markdowns
+    st.markdown(f"### {embed['title']}{blind_suffix}")
+    st.caption(f"**CHARACTER:** {embed['author']['name']}")
     
-    # 2. Append Content Fields Smoothly
-    for field in embed['fields']:
-        # Strip markdown bold formatting indicators out to cleanly process raw textual content
-        clean_val = field['value'].replace("**", "")
-        
-        if field['inline']:
-            # Render side-by-side attributes dynamically
-            html_str += f"""
-            <div style="font-size: 14px; color: #dcddde;">
-                <span style="color: #8e9297; font-weight: 500;">{field['name']}:</span> {clean_val}
-            </div>
-            """
-        else:
-            # Render block summaries cleanly
-            html_str += f"""
-            <div style="margin-top: 4px; padding: 10px; background-color: #2f3136; border-radius: 4px; border: 1px solid #202225;">
-                <div style="color: #8e9297; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">{field['name']}</div>
-                <div style="color: #ffffff; font-size: 14px; font-weight: 500;">{clean_val}</div>
-            </div>
-            """
-            
-    # 3. Securely Close HTML Tag Tree
-    html_str += "</div></div>"
-    
-    # Render unified package down to container
-    st.markdown(html_str, unsafe_allow_html=True)
+    # Open up an isolated visual container box
+    with st.container(border=True):
+        for field in embed['fields']:
+            if field['inline']:
+                # Print clean, single-line stats side-by-side
+                st.write(f"**{field['name']}**: {field['value']}")
+            else:
+                # Group block breakdowns and outcome summaries into clean emphasis boxes
+                st.info(f"**{field['name']}**\n\n{field['value']}")
+    st.markdown(" ") # Spacer
 
 # --- Web UI Interface Layout ---
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
