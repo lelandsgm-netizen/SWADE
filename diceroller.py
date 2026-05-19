@@ -11,7 +11,6 @@ if "DISCORD_WEBHOOK_URL" in st.secrets:
 else:
     DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
 
-# Initialize Local Storage Connector
 local_storage = LocalStorage()
 
 # --- Webhook Transmission ---
@@ -139,7 +138,7 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     
     title_text = f"⚔️ Damage Roll: {dice_input}"
     if macro_label:
-        title_text = f"⚡ {macro_label} | {title_text}"
+        title_text = f"⚔️ {macro_label} | {title_text}"
 
     embed = {
         "title": title_text,
@@ -153,51 +152,114 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
 st.set_page_config(page_title="SWADE Premium Roller", page_icon="🎲", layout="wide")
 st.title("🎲 SWADE Tactical Dice Console")
 
-# Secure safe fallbacks for Local Storage context parameters
+# Secure safe fallbacks for Local Storage parameters across all 6 slots
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
-saved_macro_1 = local_storage.getItem("swade_macro_1") or ""
-saved_macro_2 = local_storage.getItem("swade_macro_2") or ""
+
+macro_data = {}
+for i in range(1, 7):
+    macro_data[f"t_{i}"] = local_storage.getItem(f"swade_m{i}_t") or ""
+    macro_data[f"f_{i}"] = local_storage.getItem(f"swade_m{i}_f") or ""
+    saved_ap = local_storage.getItem(f"swade_m{i}_ap") or "0"
+    try:
+        macro_data[f"ap_{i}"] = int(saved_ap)
+    except:
+        macro_data[f"ap_{i}"] = 0
 
 col_main, col_macro = st.columns([2, 1])
 
 with col_macro:
-    st.header("💾 Character Profile")
+    st.header("💾 Character Configuration")
     p_name = st.text_input("Character Name:", value=saved_name)
     
-    st.subheader("⚔️ Custom Weapon Macros")
-    m1_val = st.text_input("Macro 1 Title:", value=saved_macro_1, key="m1_t")
-    m1_form = st.text_input("Macro 1 Formula:", placeholder="1d10+1d6+2", key="m1_f")
-    m1_ap = st.number_input("Macro 1 AP:", value=0, min_value=0, key="m1_ap")
+    st.subheader("⚔️ Manage Attack Macros")
     
-    st.markdown("---")
-    m2_val = st.text_input("Macro 2 Title:", value=saved_macro_2, key="m2_t")
-    m2_form = st.text_input("Macro 2 Formula:", placeholder="2d6", key="m2_f")
-    m2_ap = st.number_input("Macro 2 AP:", value=0, min_value=0, key="m2_ap")
+    # Use clean tab layouts to keep 6 macros organized and slick
+    tab1, tab2, tab3 = st.tabs(["Macros 1-2", "Macros 3-4", "Macros 5-6"])
     
-    if st.button("💾 Save Settings to This Device", use_container_width=True):
-        # PATCHED: Explicit contextual isolation keys added to prevent engine element collisions
-        local_storage.setItem("swade_player_name", p_name, key="save_storage_name")
-        local_storage.setItem("swade_macro_1", m1_val, key="save_storage_m1")
-        local_storage.setItem("swade_macro_2", m2_val, key="save_storage_m2")
-        st.success("Profile updated securely! Refresh the window to verify parameters.")
+    with tab1:
+        st.markdown("**Slot #1**")
+        m1_t = st.text_input("Title:", value=macro_data["t_1"], key="in_m1_t")
+        m1_f = st.text_input("Formula (e.g., 2d6):", value=macro_data["f_1"], key="in_m1_f", placeholder="2d6")
+        m1_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_1"], min_value=0, key="in_m1_ap")
+        st.markdown("---")
+        st.markdown("**Slot #2**")
+        m2_t = st.text_input("Title:", value=macro_data["t_2"], key="in_m2_t")
+        m2_f = st.text_input("Formula (e.g., 1d10+1d6):", value=macro_data["f_2"], key="in_m2_f", placeholder="1d10+1d6")
+        m2_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_2"], min_value=0, key="in_m2_ap")
+        
+    with tab2:
+        st.markdown("**Slot #3**")
+        m3_t = st.text_input("Title:", value=macro_data["t_3"], key="in_m3_t")
+        m3_f = st.text_input("Formula:", value=macro_data["f_3"], key="in_m3_f", placeholder="d6+2")
+        m3_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_3"], min_value=0, key="in_m3_ap")
+        st.markdown("---")
+        st.markdown("**Slot #4**")
+        m4_t = st.text_input("Title:", value=macro_data["t_4"], key="in_m4_t")
+        m4_f = st.text_input("Formula:", value=macro_data["f_4"], key="in_m4_f", placeholder="2d8")
+        m4_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_4"], min_value=0, key="in_m4_ap")
+        
+    with tab3:
+        st.markdown("**Slot #5**")
+        m5_t = st.text_input("Title:", value=macro_data["t_5"], key="in_m5_t")
+        m5_f = st.text_input("Formula:", value=macro_data["f_5"], key="in_m5_f", placeholder="3d6")
+        m5_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_5"], min_value=0, key="in_m5_ap")
+        st.markdown("---")
+        st.markdown("**Slot #6**")
+        m6_t = st.text_input("Title:", value=macro_data["t_6"], key="in_m6_t")
+        m6_f = st.text_input("Formula:", value=macro_data["f_6"], key="in_m6_f", placeholder="1d12+2")
+        m6_ap = st.number_input("Armor Piercing (AP):", value=macro_data["ap_6"], min_value=0, key="in_m6_ap")
+        
+    if st.button("💾 Save Profile to This Device", use_container_width=True):
+        local_storage.setItem("swade_player_name", p_name, key="save_st_name")
+        local_storage.setItem("swade_m1_t", m1_t, key="save_st_m1_t")
+        local_storage.setItem("swade_m1_f", m1_f, key="save_st_m1_f")
+        local_storage.setItem("swade_m1_ap", str(m1_ap), key="save_st_m1_ap")
+        
+        local_storage.setItem("swade_m2_t", m2_t, key="save_st_m2_t")
+        local_storage.setItem("swade_m2_f", m2_f, key="save_st_m2_f")
+        local_storage.setItem("swade_m2_ap", str(m2_ap), key="save_st_m2_ap")
+        
+        local_storage.setItem("swade_m3_t", m3_t, key="save_st_m3_t")
+        local_storage.setItem("swade_m3_f", m3_f, key="save_st_m3_f")
+        local_storage.setItem("swade_m3_ap", str(m3_ap), key="save_st_m3_ap")
+        
+        local_storage.setItem("swade_m4_t", m4_t, key="save_st_m4_t")
+        local_storage.setItem("swade_m4_f", m4_f, key="save_st_m4_f")
+        local_storage.setItem("swade_m4_ap", str(m4_ap), key="save_st_m4_ap")
+        
+        local_storage.setItem("swade_m5_t", m5_t, key="save_st_m5_t")
+        local_storage.setItem("swade_m5_f", m5_f, key="save_st_m5_f")
+        local_storage.setItem("swade_m5_ap", str(m5_ap), key="save_st_m5_ap")
+        
+        local_storage.setItem("swade_m6_t", m6_t, key="save_st_m6_t")
+        local_storage.setItem("swade_m6_f", m6_f, key="save_st_m6_f")
+        local_storage.setItem("swade_m6_ap", str(m6_ap), key="save_st_m6_ap")
+        
+        st.success("All 6 macros saved! Refresh page to update shortcuts.")
 
 with col_main:
-    st.header("🎯 Active Battlefield Console")
+    st.header("🎯 Combat Weapon Macros")
     
-    if m1_val and m1_form:
-        if st.button(f"⚔️ Attack via macro: {m1_val} ({m1_form})", use_container_width=True):
-            embed, total = execute_formula_damage_roll(p_name, m1_form, m1_ap, macro_label=m1_val)
-            if embed:
-                send_discord_roll(embed)
-                st.success(f"Sent **{total} Damage** to Discord.")
-                
-    if m2_val and m2_form:
-        if st.button(f"🔥 Cast via macro: {m2_val} ({m2_form})", use_container_width=True):
-            embed, total = execute_formula_damage_roll(p_name, m2_form, m2_ap, macro_label=m2_val)
-            if embed:
-                send_discord_roll(embed)
-                st.success(f"Sent **{total} Damage** to Discord.")
+    # Dynamically map out quick-fire buttons for any active slots
+    grid_cols = st.columns(2)
+    macro_slots = [(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), 
+                   (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)]
+    
+    col_idx = 0
+    for title, formula, ap in macro_slots:
+        if title and formula:
+            with grid_cols[col_idx % 2]:
+                if st.button(f"⚔️ Fire: {title} ({formula})", use_container_width=True, key=f"btn_run_{title}_{col_idx}"):
+                    embed, total = execute_formula_damage_roll(p_name, formula, ap, macro_label=title)
+                    if embed:
+                        send_discord_roll(embed)
+                        st.success(f"Dispatched **{total} Damage** to Discord.")
+            col_idx += 1
+            
+    if col_idx == 0:
+        st.info("No weapon macros active yet. Configure slots on the right panel to generate shortcut buttons!")
 
+    st.markdown("---")
     st.markdown("### Manual Dashboard Override")
     roll_mode = st.radio("Select Action Type:", ["📊 Trait Test (Skill/Attribute)", "💥 Weapon/Spell Damage"])
 
