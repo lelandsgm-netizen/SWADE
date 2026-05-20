@@ -2,6 +2,8 @@ import streamlit as st
 import random
 import requests
 import re
+import json
+from supabase import create_client, Client
 from streamlit_local_storage import LocalStorage
 
 # --- Global Page Configuration ---
@@ -9,10 +11,18 @@ st.set_page_config(page_title="SWADE Master Toolkit", page_icon="🃏", layout="
 
 local_storage = LocalStorage()
 
-if "DISCORD_WEBHOOK_URL" in st.secrets:
-    DISCORD_WEBHOOK_URL = st.secrets["DISCORD_WEBHOOK_URL"]
-else:
-    DISCORD_WEBHOOK_URL = None
+# --- Secure Server Environment Variables Integration ---
+DISCORD_WEBHOOK_URL = st.secrets.get("DISCORD_WEBHOOK_URL", None)
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", None)
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", None)
+
+# Initialize Supabase Engine if secrets exist safely
+supabase_client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except:
+        pass
 
 # --- Persistent Session State Configuration ---
 if "deck" not in st.session_state:
@@ -32,7 +42,50 @@ if "round_counter" not in st.session_state:
 if "round_history" not in st.session_state:
     st.session_state.round_history = [] 
 if "current_round_hands" not in st.session_state:
-    st.session_state.current_round_hands = {} # Core fixed memory container for active UI display
+    st.session_state.current_round_hands = {}
+
+# Dynamic Room Management State
+if "connected_room_code" not in st.session_state:
+    st.session_state.connected_room_code = "SWAD" # Default room code anchor
+
+# ==========================================
+#     🌟 DATABASE CLOUD SYNC OPERATIONS
+# ==========================================
+def push_initiative_to_db(room_code, sorted_hands_dict, round_num):
+    """Pushes a live round card manifest to the Supabase cloud table."""
+    if not supabase_client:
+        return
+    
+    # Package data neatly into JSON format
+    payload = {
+        "round": round_num,
+        "joker_drawn": st.session_state.joker_drawn,
+        "hands": sorted_hands_dict
+    }
+    
+    try:
+        # Check if row already exists for this room
+        response = supabase_client.table("combat_sessions").select("*").eq("room_code", room_code.upper()).execute()
+        if response.data:
+            # Update existing row
+            supabase_client.table("combat_sessions").update({"sorted_hands": payload}).eq("room_code", room_code.upper()).execute()
+        else:
+            # Insert fresh row
+            supabase_client.table("combat_sessions").insert({"room_code": room_code.upper(), "sorted_hands": payload}).execute()
+    except:
+        pass
+
+def pull_initiative_from_db(room_code):
+    """Retrieves the live synchronized round manifest from the cloud."""
+    if not supabase_client:
+        return None
+    try:
+        response = supabase_client.table("combat_sessions").select("sorted_hands").eq("room_code", room_code.upper()).execute()
+        if response.data and response.data[0]["sorted_hands"]:
+            return response.data[0]["sorted_hands"]
+    except:
+        pass
+    return None
 
 # ==========================================
 #      CARD DEALER ENGINE ENGINE CORES
@@ -55,17 +108,12 @@ if not st.session_state.deck and not st.session_state.discard:
     shuffle_deck()
 
 def get_card_weight(card_str):
-    """Assigns an absolute rule-accurate SWADE hierarchy value to any given card string."""
     if "Joker" in card_str:
-        return 9999 # Jokers dominate completely
-    
+        return 9999
     val_part = card_str[:-1]
     suit_part = card_str[-1]
-    
     value_map = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14}
-    suit_map = {'♠':4, '♥':3, '♦':2, '♣':1} # Spades > Hearts > Diamonds > Clubs
-    
-    # PATCHED: Multiplied face values by 100 so raw card number always dictates order over suit strings
+    suit_map = {'♠':4, '♥':3, '♦':2, '♣':1}
     return (value_map.get(val_part, 0) * 100) + suit_map.get(suit_part, 0)
 
 def deal_to_roster(roster_list):
@@ -78,15 +126,15 @@ def deal_to_roster(roster_list):
         if "Joker" in card:
             st.session_state.joker_drawn = True
             
-    # Sort hands perfectly by corrected weight values
     sorted_hands = dict(sorted(hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
     
     st.session_state.round_counter += 1
     st.session_state.current_round_hands = sorted_hands
-    
-    # Store complete round snapshot as a list of item tuples to protect internal scope integrity
     st.session_state.round_history.insert(0, (st.session_state.round_counter, list(sorted_hands.items())))
     st.session_state.discard.extend(sorted_hands.values())
+    
+    # CLOUD SYNC EXECUTION: Push the round update live to Supabase server
+    push_initiative_to_db(st.session_state.connected_room_code, sorted_hands, st.session_state.round_counter)
     
     send_initiative_to_discord(sorted_hands, st.session_state.round_counter)
 
@@ -246,7 +294,11 @@ def render_stream_card(embed, is_blind=False):
 #     👑 SIDEBAR NAVIGATION INTERFACE 👑
 # ==========================================
 st.sidebar.title("🎮 GM Operations Desk")
-app_mode = st.sidebar.radio("Select Dashboard View:", ["🎲 Tactical Dice Console", "🃏 Action Card Dealer"])
+app_mode = st.sidebar.radio("Select Dashboard View:", [
+    "🎲 Tactical Dice Console", 
+    "🃏 Action Card Dealer (GM)", 
+    "📡 Join Live Battle Session (Player)"
+])
 st.sidebar.markdown("---")
 
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
@@ -283,6 +335,9 @@ with st.sidebar.expander("👤 Character Profile Caching"):
 # ==========================================
 if app_mode == "🎲 Tactical Dice Console":
     st.header("🎲 SWADE Tactical Dice Console")
+    if not supabase_client:
+        st.error("🔌 Cloud Database Link Offline. Check your Streamlit Secrets configurations.")
+    
     blind_roll = st.checkbox("🕵️ Blind Roll", value=False) if gm_mode else False
     if blind_roll: st.warning("Privacy Shield Active.")
 
@@ -325,12 +380,16 @@ if app_mode == "🎲 Tactical Dice Console":
         for h_e, h_b in st.session_state.roll_history: render_stream_card(h_e, is_blind=h_b)
 
 # ==========================================
-#      VIEW 2: ACTION CARD DEALER (FIXED MANIFEST)
+#      VIEW 2: ACTION CARD DEALER (GM DASHBOARD)
 # ==========================================
-else:
-    st.header("🃏 Action Card Dealer")
+elif app_mode == "🃏 Action Card Dealer (GM)":
+    st.header("🃏 Action Card Dealer (GM Control Deck)")
+    
+    # Secure Session Room Allocation setup
+    st.session_state.connected_room_code = st.text_input("Campaign Active Room Code:", value="SWAD", max_chars=6).upper()
+    
     if st.session_state.joker_drawn: st.error("🚨 JOKER DRAWN! RESHUFFLE NEXT ROUND.")
-    st.metric("Cards Remaining", len(st.session_state.deck))
+    st.metric("Cards Remaining in Deck", len(st.session_state.deck))
     
     st.subheader("👥 Tactical Roster")
     full_roster = [p_name] + st.session_state.manual_combatants
@@ -353,7 +412,6 @@ else:
     if st.button("🃏 Deal Cards & Next Round", type="primary", use_container_width=True):
         if full_roster: deal_to_roster(full_roster); st.rerun()
 
-    # --- THE ROUND MANIFEST ---
     st.markdown("---")
     st.subheader("📜 Round Manifest")
     
@@ -362,33 +420,74 @@ else:
         st.session_state.round_history = []
         st.session_state.current_round_hands = {}
         st.session_state.joker_drawn = False
+        push_initiative_to_db(st.session_state.connected_room_code, {}, 0) # Wipe database state cleanly
         st.rerun()
 
     if st.session_state.round_history:
-        st.info("💡 Cards are automatically sorted by SWADE value and suit hierarchy (Spades > Hearts > Diamonds > Clubs).")
-        
-        # FIX: Explicit structural loops targeting structured scope definitions for layout stability
+        st.info("💡 Cards are automatically sorted by SWADE value and suit hierarchy.")
         for r_num, hands_list in st.session_state.round_history:
             with st.expander(f"📅 ROUND {r_num} SUMMARY", expanded=(r_num == st.session_state.round_counter)):
                 cols = st.columns(len(hands_list))
                 for idx, (name, card) in enumerate(hands_list):
                     with cols[idx]:
-                        # Visual Logic: Display proper ACTING # sequence string (1-indexed base)
                         badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{idx+1}</div>"
                         is_joker = "Joker" in card
                         bg = "#ff4b4b" if is_joker else "#1e1e24"
                         suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
-                        
-                        st.markdown(
-                            f"""
-                            <div style="background-color:{bg}; text-align:center; padding:12px; border-radius:5px; border:1px solid #4a4a4a; min-height:120px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-                                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;">
-                                    <strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:90px;">{name}</strong>
-                                    {badge}
-                                </div>
-                                <div style="font-size:24px; font-weight:bold; color:{suit_c};">{card}</div>
-                            </div>
-                            """, unsafe_allow_html=True
-                        )
+                        st.markdown(f'<div style="background-color:{bg}; text-align:center; padding:12px; border-radius:5px; border:1px solid #4a4a4a; min-height:120px;"><div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;"><strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:90px;">{name}</strong>{badge}</div><div style="font-size:24px; font-weight:bold; color:{suit_c};">{card}</div></div>', unsafe_allow_html=True)
     else:
         st.caption("Manifest empty. Deal cards to begin Round 1.")
+
+# ==========================================
+#      VIEW 3: THE LIVE PLAYER SESSION SYNC OVERVIEW
+# ==========================================
+else:
+    st.header("📡 Live Table Initiative Session Sync")
+    
+    st.markdown("Enter your active campaign connection parameters below to view the GM's digital card table in real time.")
+    
+    c_r1, c_r2 = st.columns([1, 2])
+    with c_r1:
+        target_room = st.text_input("Enter 4-Letter Room Code:", value="SWAD", max_chars=6).upper()
+    with c_r2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        refresh_trigger = st.button("🔄 Pull Current Table Initiative Status", type="primary", use_container_width=True)
+        
+    st.markdown("---")
+    
+    # Pull dynamic state parameters right from the cloud database row
+    cloud_data = pull_initiative_from_db(target_room)
+    
+    if cloud_data and cloud_data.get("hands"):
+        r_num = cloud_data.get("round", 1)
+        is_j_drawn = cloud_data.get("joker_drawn", False)
+        hands_dict = cloud_data.get("hands", {})
+        
+        st.subheader(f"🎴 Live Round Manifest: Round {r_num}")
+        if is_j_drawn:
+            st.error("🚨 A JOKER HAS BEEN UNLEASHED THIS ROUND! ALL COMBATANTS REMAIN ON HIGH ALERT. 🚨")
+            
+        st.caption("Sorted Sequence of Battle Order:")
+        
+        # Draw synced cards into player panels
+        p_cols = st.columns(len(hands_dict))
+        for idx, (name, card) in enumerate(hands_dict.items()):
+            with p_cols[idx]:
+                badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{idx+1}</div>"
+                is_joker = "Joker" in card
+                bg = "#ff4b4b" if is_joker else "#1e1e24"
+                suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+                
+                st.markdown(
+                    f"""
+                    <div style="background-color:{bg}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; min-height:130px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:6px; margin-bottom:10px;">
+                            <strong style="font-size:12px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">{name}</strong>
+                            {badge}
+                        </div>
+                        <div style="font-size:28px; font-weight:bold; color:{suit_c}; margin-top:5px;">{card}</div>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+    else:
+        st.warning(f"No active combat dashboard found matching Room Code '{target_room}'. Tell your GM to generate an active deal round first!")
