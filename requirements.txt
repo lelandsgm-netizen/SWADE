@@ -1,3 +1,4 @@
 requests
 streamlit-extras
 streamlit-local-storage
+supabase
