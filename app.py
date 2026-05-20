@@ -441,6 +441,9 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
 # ==========================================
 #      VIEW 3: THE LIVE PLAYER SESSION SYNC OVERVIEW
 # ==========================================
+# ==========================================
+#      VIEW 3: THE LIVE PLAYER SESSION SYNC OVERVIEW
+# ==========================================
 else:
     st.header("📡 Live Table Initiative Session Sync")
     
@@ -469,25 +472,56 @@ else:
             
         st.caption("Sorted Sequence of Battle Order:")
         
-        # Draw synced cards into player panels
-        p_cols = st.columns(len(hands_dict))
+        # INJECT RESPONSIVE CSS: Forces cards into a clean, scrolling row on small screens instead of vertical blocks
+        st.markdown(
+            """
+            <style>
+            .mobile-card-container {
+                display: flex;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                gap: 12px;
+                padding: 10px 4px;
+                -webkit-overflow-scrolling: touch;
+            }
+            .mobile-initiative-card {
+                flex: 0 0 140px; /* Locks cards to a readable width on mobile phone screens */
+                text-align: center; 
+                padding: 14px; 
+                border-radius: 6px; 
+                border: 1px solid #4a4a4a; 
+                min-height: 120px; 
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            }
+            /* Hide standard scrollbar for a premium UI feel */
+            .mobile-card-container::-webkit-scrollbar {
+                display: none;
+            }
+            </style>
+            """, unsafe_allow_html=True
+        )
+        
+        # Build the synchronized layout row using raw HTML flexbox for mobile scaling stability
+        html_cards = '<div class="mobile-card-container">'
+        
         for idx, (name, card) in enumerate(hands_dict.items()):
-            with p_cols[idx]:
-                badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{idx+1}</div>"
-                is_joker = "Joker" in card
-                bg = "#ff4b4b" if is_joker else "#1e1e24"
-                suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
-                
-                st.markdown(
-                    f"""
-                    <div style="background-color:{bg}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; min-height:130px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
-                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:6px; margin-bottom:10px;">
-                            <strong style="font-size:12px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">{name}</strong>
-                            {badge}
-                        </div>
-                        <div style="font-size:28px; font-weight:bold; color:{suit_c}; margin-top:5px;">{card}</div>
-                    </div>
-                    """, unsafe_allow_html=True
-                )
+            badge = f"<span style='background-color:#5865f2; color:white; font-size:9px; padding:2px 4px; border-radius:3px; font-weight:bold;'>#{idx+1}</span>"
+            is_joker = "Joker" in card
+            bg = "#ff4b4b" if is_joker else "#1e1e24"
+            suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+            
+            html_cards += f"""
+            <div class="mobile-initiative-card" style="background-color: {bg};">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;">
+                    <strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;">{name}</strong>
+                    {badge}
+                </div>
+                <div style="font-size:26px; font-weight:bold; color:{suit_c}; margin-top:8px;">{card}</div>
+            </div>
+            """
+            
+        html_cards += '</div>'
+        st.markdown(html_cards, unsafe_allow_html=True)
+        st.info("📱 **Mobile Optimization Active:** Swipe horizontally on the card row above to scroll through the full turn order sequence!")
     else:
         st.warning(f"No active combat dashboard found matching Room Code '{target_room}'. Tell your GM to generate an active deal round first!")
