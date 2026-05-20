@@ -20,13 +20,13 @@ if "deck" not in st.session_state:
 if "discard" not in st.session_state:
     st.session_state.discard = []
 if "hand_dict" not in st.session_state:
-    st.session_state.hand_dict = {}  # Overhauled to map custom character names to specific cards
+    st.session_state.hand_dict = {}  
 if "joker_drawn" not in st.session_state:
     st.session_state.joker_drawn = False
 if "roll_history" not in st.session_state:
     st.session_state.roll_history = []
 if "manual_combatants" not in st.session_state:
-    st.session_state.manual_combatants = [] # Persistent list for tracking extra NPCs/Monsters
+    st.session_state.manual_combatants = [] 
 
 # ==========================================
 #      CARD DEALER ENGINE ENGINE CORES
@@ -49,8 +49,21 @@ def shuffle_deck():
 if not st.session_state.deck and not st.session_state.discard:
     shuffle_deck()
 
+def get_card_weight(card_str):
+    """Assigns an absolute rule-accurate SWADE hierarchy value to any given card string."""
+    if "Joker" in card_str:
+        return 999  # Jokers completely dominate any standard deal hierarchy
+    
+    # Extract structural value and suit strings securely
+    val_part = card_str[:-1]
+    suit_part = card_str[-1]
+    
+    value_map = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14}
+    suit_map = {'♠':4, '♥':3, '♦':2, '♣':1} # SWADE Suit Priority: Spades > Hearts > Diamonds > Clubs
+    
+    return (value_map.get(val_part, 0) * 10) + suit_map.get(suit_part, 0)
+
 def deal_to_roster(roster_list):
-    """Deals a unique card out of the remaining deck to every declared name in the combat roster."""
     current_round_hands = {}
     for actor in roster_list:
         if not st.session_state.deck:
@@ -59,8 +72,45 @@ def deal_to_roster(roster_list):
         current_round_hands[actor] = card
         if "Joker" in card:
             st.session_state.joker_drawn = True
+            
     st.session_state.hand_dict = current_round_hands
     st.session_state.discard.extend(current_round_hands.values())
+    
+    # Dynamic Sorting Execution: Rearrange structure from highest card weight down to lowest card weight
+    sorted_hands = dict(sorted(current_round_hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
+    st.session_state.hand_dict = sorted_hands
+    
+    # DISCORD INTEGRATION: Broadcast Sorted Turn Cards out to the Table Channel
+    send_initiative_to_discord(sorted_hands)
+
+def send_initiative_to_discord(sorted_hands):
+    """Dispatches a clean, structured turn layout embed table directly into your Discord channel."""
+    if not DISCORD_WEBHOOK_URL:
+        return
+        
+    fields = []
+    for idx, (actor_name, card_value) in enumerate(sorted_hands.items(), 1):
+        prefix = "🔥 [ACTING FIRST]" if idx == 1 else f"Turn #{idx}"
+        if "Joker" in card_value:
+            prefix = "🃏 [JOKER - FREE RERUN]"
+        fields.append({
+            "name": f"{idx}. {actor_name.upper()}",
+            "value": f"Dealt Initiative Card: **{card_value}**\n↳ Context: *{prefix}*",
+            "inline": False
+        })
+        
+    embed = {
+        "title": "⚔️ Tactical Turn Order Dispatched!",
+        "description": "The initiative card deck has been dealt and sorted by rule hierarchy.",
+        "color": 3447003, # Deep Tactical Blue Embed
+        "fields": fields
+    }
+    
+    payload = {"username": "SWADE Turn Bot", "embeds": [embed]}
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+    except:
+        pass
 
 # ==========================================
 #      DICE ROLLER MATH CORE ENGINES
@@ -379,7 +429,7 @@ if app_mode == "🎲 Tactical Dice Console":
         st.caption("Dice dashboard silent. Roll results stream here live.")
 
 # ==========================================
-#      VIEW 2: ACTION CARD DEALER (OVERHAULED)
+#      VIEW 2: ACTION CARD DEALER
 # ==========================================
 else:
     st.header("🃏 SWADE Active Roster Card Dealer")
@@ -389,28 +439,22 @@ else:
         
     st.metric("Cards Remaining in Action Deck", len(st.session_state.deck))
     
-    # --- UPGRADE: DYNAMIC ROSTER SETUP SECTION ---
     st.subheader("👥 Tactical Combat Roster")
-    
-    # Compile full roster line list (Sidebar Hero + any manual extras)
     full_combat_roster = [p_name] + st.session_state.manual_combatants
     
-    # Draw responsive data control layout rows
     col_list, col_add = st.columns([2, 1])
     
     with col_list:
         st.markdown("**Current Active Turn Order Roster:**")
         for idx, actor in enumerate(full_combat_roster):
-            # Format display labels cleanly based on actor status
             type_tag = "🎭 Player Hero" if idx == 0 else "⚔️ NPC / Monster"
-            
             with st.container(border=True):
                 r_c1, r_c2 = st.columns([5, 1])
                 with r_c1:
                     st.markdown(f"**{actor}** &nbsp;|&nbsp; <small style='color:#8e9297;'>{type_tag}</small>", unsafe_allow_html=True)
                 with r_c2:
-                    if idx > 0: # Allow deleting manually added custom entries
-                        if st.button("🗑️", key=f"del_{idx}_{actor}", help=f"Remove {actor} from combat"):
+                    if idx > 0: 
+                        if st.button("🗑️", key=f"del_{idx}_{actor}"):
                             st.session_state.manual_combatants.pop(idx - 1)
                             st.rerun()
                     else:
@@ -418,57 +462,59 @@ else:
                         
     with col_add:
         st.markdown("**Add Roster Reinforcements:**")
-        new_actor = st.text_input("Enter Combatant Name:", placeholder="Goblin Chieftain, Boss, Wild Card...", key="add_actor_name")
+        new_actor = st.text_input("Enter Combatant Name:", placeholder="Goblin Chieftain, Boss...", key="add_actor_name")
         if st.button("➕ Inject Combatant to Roster", use_container_width=True):
             if new_actor.strip() and new_actor not in full_combat_roster:
                 st.session_state.manual_combatants.append(new_actor.strip())
                 st.rerun()
-            elif not new_actor.strip():
-                st.error("Name field cannot be left blank!")
-            else:
-                st.warning("That combatant name is already active in turn rotation!")
                 
         st.markdown("---")
-        if st.button("🔄 Complete Deck Reset & Shuffle", use_container_width=True, help="Re-gathers all discards and randomizes deck"):
+        if st.button("🔄 Complete Deck Reset & Shuffle", use_container_width=True):
             shuffle_deck()
             st.success("Deck completely gathered, cleared, and thoroughly shuffled!")
 
-    # --- ACTION OPERATION EXECUTION BUTTON ---
     st.markdown("---")
-    if st.button("🃏 Deal Cards to Active Roster", type="primary", use_container_width=True):
+    if st.button("🃏 Deal Cards & Determine Initiative Order", type="primary", use_container_width=True):
         if full_combat_roster:
             deal_to_roster(full_combat_roster)
-        else:
-            st.error("Roster empty! Add combatants before dealing cards.")
+            st.rerun()
 
-    # --- DISPLAY DEAL DELIVERIES ---
+    # --- UPGRADED AUTO-SORTED DISPLAY MANIFEST ---
     if st.session_state.hand_dict:
-        st.subheader("🎴 Current Round Turn Card Manifest")
+        st.markdown("### 🎴 Current Round Turn Card Manifest")
+        st.info("💡 **Initiative Resolved:** Cards have been automatically sorted from highest down to lowest to establish the exact sequence of play left-to-right.")
         
-        # Build responsive column display tracking length of active combatant size
         card_cols = st.columns(len(st.session_state.hand_dict))
         
         for idx, (actor_name, card_value) in enumerate(st.session_state.hand_dict.items()):
             with card_cols[idx]:
+                # Assign visual badge numbers directly to the card graphics
+                turn_badge = f"<span style='background-color:#5865f2; font-size:11px; padding:2px 6px; border-radius:3px; font-weight:bold; color:white;'>ACTING #{idx}</span>"
+                
                 if "Joker" in card_value:
                     st.markdown(
                         f"""
-                        <div style="background-color:#ff4b4b; text-align:center; padding:16px; border-radius:5px; color:white; font-family:sans-serif;">
-                            <strong style="font-size:14px; text-transform:uppercase; display:block; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.3); padding-bottom:4px;">{actor_name}</strong>
-                            <div style="font-size:28px; font-weight:bold; margin:10px 0;">{card_value}</div>
+                        <div style="background-color:#ff4b4b; text-align:center; padding:16px; border-radius:5px; color:white; font-family:sans-serif; min-height:140px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                            <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.3); padding-bottom:6px;">
+                                <strong style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">{actor_name}</strong>
+                                <span style='background-color:#f1c40f; color:#111; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>💥 JOKER</span>
+                            </div>
+                            <div style="font-size:32px; font-weight:bold; margin:14px 0;">{card_value}</div>
                         </div>
                         """, 
                         unsafe_allow_html=True
                     )
                 else:
                     bg_box = "#1e1e24"
-                    # Match card suit colors natively
                     suit_color = "#ff4b4b" if ('♥' in card_value or '♦' in card_value) else "#ffffff"
                     st.markdown(
                         f"""
-                        <div style="background-color:{bg_box}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; font-family:sans-serif;">
-                            <strong style="font-size:14px; text-transform:uppercase; color:#b9bbbe; display:block; margin-bottom:8px; border-bottom:1px solid #4a4a4a; padding-bottom:4px;">{actor_name}</strong>
-                            <div style="font-size:28px; font-weight:bold; color:{suit_color}; margin:10px 0;">{card_value}</div>
+                        <div style="background-color:{bg_box}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; font-family:sans-serif; min-height:140px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                            <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #4a4a4a; padding-bottom:6px;">
+                                <strong style="font-size:13px; text-transform:uppercase; color:#b9bbbe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">{actor_name}</strong>
+                                {turn_badge}
+                            </div>
+                            <div style="font-size:32px; font-weight:bold; color:{suit_color}; margin:14px 0;">{card_value}</div>
                         </div>
                         """, 
                         unsafe_allow_html=True
