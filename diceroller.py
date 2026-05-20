@@ -6,10 +6,12 @@ import json
 from streamlit_local_storage import LocalStorage
 
 # --- Configuration ---
+# PATHED: Removed raw string literal fallback to prevent repository data leaks.
+# Assumes 'DISCORD_WEBHOOK_URL' is configured via the Streamlit Secrets manager.
 if "DISCORD_WEBHOOK_URL" in st.secrets:
     DISCORD_WEBHOOK_URL = st.secrets["DISCORD_WEBHOOK_URL"]
 else:
-    DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1316953166142771272/2Tmz3vk-Vvb7bcxTmqZfYPJI7y4r7jssH8X1Rs9cQSN2owvroBpOfsuUAtGypPBxC6Ik"
+    DISCORD_WEBHOOK_URL = None
 
 local_storage = LocalStorage()
 
@@ -18,10 +20,8 @@ if "roll_history" not in st.session_state:
 
 # --- Webhook Transmission ---
 def send_discord_roll(embed, is_blind=False):
-    if is_blind:
-        return True 
-    if not DISCORD_WEBHOOK_URL:
-        return False
+    if is_blind or not DISCORD_WEBHOOK_URL:
+        return True # Intercepted locally or no server destination configured
     payload = {"username": "SWADE Dice Bot", "embeds": [embed]}
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
@@ -73,18 +73,15 @@ def calculate_resolution(total, tn):
 
 # --- Processing Engines ---
 def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_penalty, target_number, is_frenzy=False):
-    """Executes a standard or Frenzy-enabled SWADE Trait Test combining situational modifiers and Multi-Action Penalties."""
     fields_log = []
     total_modifier = situational_mod + map_penalty
     mod_sign = f"+{total_modifier}" if total_modifier >= 0 else f"{total_modifier}"
     
-    # 1. Roll the Shared Wild Die
     wild_rolls = roll_single_die(6)
     wild_total = sum(wild_rolls)
     wild_trail = " -> ".join([f"[{r}]" if r != 6 else f"[{r}]💥" for r in wild_rolls])
     
     if not is_frenzy:
-        # Standard Single Attack Logic
         trait_rolls = roll_single_die(die_sides)
         trait_total = sum(trait_rolls)
         trait_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in trait_rolls])
@@ -113,7 +110,6 @@ def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_pen
         title_text = f"📊 Trait Test: d{die_sides} (Net Mod: {mod_sign})"
         
     else:
-        # True SWADE Frenzy Multi-Attack Logic RESTORED
         t1_rolls = roll_single_die(die_sides)
         t1_total = sum(t1_rolls)
         t1_trail = " -> ".join([f"[{r}]" if r != die_sides else f"[{r}]💥" for r in t1_rolls])
@@ -142,7 +138,6 @@ def execute_dropdown_trait_roll(player_name, die_sides, situational_mod, map_pen
             res1, _ = calculate_resolution(final_atk1, target_number)
             res2, _ = calculate_resolution(final_atk2, target_number)
             
-            # Transparency log for tracking the penalty breakdown
             penalty_breakdown = ""
             if situational_mod != 0:
                 penalty_breakdown += f" + Sit Mod ({situational_mod})"
@@ -332,10 +327,7 @@ with col_main:
                                          format_func=lambda x: f"{x} Action ('0' Penalty)" if x == 1 else (f"{x} Actions ('-2' Penalty)" if x == 2 else f"{x} Actions ('-4' Penalty)"))
             
         map_penalty = 0 if action_intent == 1 else (-2 if action_intent == 2 else -4)
-        
-        # RESTORED: Dedicated toggle element allowing Frenzy attacks inside any turning context
         frenzy_selection = st.checkbox("Apply Frenzy Edge? (2x Attacks via 1 Shared Wild Die)", value=False)
-        
         tn_choice = st.number_input("Target Number (TN):", value=4, step=1)
 
         if st.button("🎲 Make Trait Roll", type="primary", use_container_width=True):
