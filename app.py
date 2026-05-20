@@ -7,27 +7,26 @@ from streamlit_local_storage import LocalStorage
 # --- Global Page Configuration ---
 st.set_page_config(page_title="SWADE Master Toolkit", page_icon="🃏", layout="wide")
 
-# Initialize Local Storage Connector
 local_storage = LocalStorage()
 
-# --- Sync Server Secrets Safely ---
 if "DISCORD_WEBHOOK_URL" in st.secrets:
     DISCORD_WEBHOOK_URL = st.secrets["DISCORD_WEBHOOK_URL"]
 else:
     DISCORD_WEBHOOK_URL = None
 
 # --- Persistent Session State Configuration ---
-# This guarantees your card deck doesn't auto-wipe when navigating between pages!
 if "deck" not in st.session_state:
     st.session_state.deck = []
 if "discard" not in st.session_state:
     st.session_state.discard = []
-if "hand" not in st.session_state:
-    st.session_state.hand = []
+if "hand_dict" not in st.session_state:
+    st.session_state.hand_dict = {}  # Overhauled to map custom character names to specific cards
 if "joker_drawn" not in st.session_state:
     st.session_state.joker_drawn = False
 if "roll_history" not in st.session_state:
     st.session_state.roll_history = []
+if "manual_combatants" not in st.session_state:
+    st.session_state.manual_combatants = [] # Persistent list for tracking extra NPCs/Monsters
 
 # ==========================================
 #      CARD DEALER ENGINE ENGINE CORES
@@ -44,23 +43,24 @@ def shuffle_deck():
     st.session_state.deck = build_deck()
     random.shuffle(st.session_state.deck)
     st.session_state.discard = []
-    st.session_state.hand = []
+    st.session_state.hand_dict = {}
     st.session_state.joker_drawn = False
 
 if not st.session_state.deck and not st.session_state.discard:
     shuffle_deck()
 
-def draw_cards(num):
-    drawn = []
-    for _ in range(num):
+def deal_to_roster(roster_list):
+    """Deals a unique card out of the remaining deck to every declared name in the combat roster."""
+    current_round_hands = {}
+    for actor in roster_list:
         if not st.session_state.deck:
             break
         card = st.session_state.deck.pop(0)
-        drawn.append(card)
+        current_round_hands[actor] = card
         if "Joker" in card:
             st.session_state.joker_drawn = True
-    st.session_state.hand = drawn
-    st.session_state.discard.extend(drawn)
+    st.session_state.hand_dict = current_round_hands
+    st.session_state.discard.extend(current_round_hands.values())
 
 # ==========================================
 #      DICE ROLLER MATH CORE ENGINES
@@ -258,7 +258,6 @@ app_mode = st.sidebar.radio("Select Dashboard View:", ["🎲 Tactical Dice Conso
 
 st.sidebar.markdown("---")
 
-# Load device local storage data profiles
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
 macro_data = {}
 for i in range(1, 7):
@@ -270,7 +269,6 @@ for i in range(1, 7):
     except:
         macro_data[f"ap_{i}"] = 0
 
-# Render Configuration Panel under navigation
 with st.sidebar.expander("👤 Character Profile Caching"):
     p_name = st.text_input("Profile Identity Name:", value=saved_name)
     gm_mode = st.checkbox("🔮 Activate GM Shield Mode", value=False)
@@ -381,42 +379,97 @@ if app_mode == "🎲 Tactical Dice Console":
         st.caption("Dice dashboard silent. Roll results stream here live.")
 
 # ==========================================
-#      VIEW 2: ACTION CARD DEALER
+#      VIEW 2: ACTION CARD DEALER (OVERHAULED)
 # ==========================================
 else:
-    st.header("🃏 SWADE Action Card Dealer")
+    st.header("🃏 SWADE Active Roster Card Dealer")
     
-    # Render global turn indicators
     if st.session_state.joker_drawn:
-        st.error("🚨 A JOKER WAS DRAWN THIS ROUND! RESHUFFLE MANDATORY FOR NEXT TURN. 🚨")
+        st.error("🚨 A JOKER WAS DRAWN THIS ROUND! RESHUFFLE MANDATORY FOR NEXT ROUND. 🚨")
         
     st.metric("Cards Remaining in Action Deck", len(st.session_state.deck))
     
-    c1, c2 = st.columns(2)
-    with c1:
-        draw_count = st.number_input("Number of Combatants Drawing Cards:", min_value=1, max_value=15, value=1)
-        if st.button("🃏 Deal Turn Cards", type="primary", use_container_width=True):
-            draw_cards(draw_count)
-    with c2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Complete Deck Reset & Shuffle", use_container_width=True):
+    # --- UPGRADE: DYNAMIC ROSTER SETUP SECTION ---
+    st.subheader("👥 Tactical Combat Roster")
+    
+    # Compile full roster line list (Sidebar Hero + any manual extras)
+    full_combat_roster = [p_name] + st.session_state.manual_combatants
+    
+    # Draw responsive data control layout rows
+    col_list, col_add = st.columns([2, 1])
+    
+    with col_list:
+        st.markdown("**Current Active Turn Order Roster:**")
+        for idx, actor in enumerate(full_combat_roster):
+            # Format display labels cleanly based on actor status
+            type_tag = "🎭 Player Hero" if idx == 0 else "⚔️ NPC / Monster"
+            
+            with st.container(border=True):
+                r_c1, r_c2 = st.columns([5, 1])
+                with r_c1:
+                    st.markdown(f"**{actor}** &nbsp;|&nbsp; <small style='color:#8e9297;'>{type_tag}</small>", unsafe_allow_html=True)
+                with r_c2:
+                    if idx > 0: # Allow deleting manually added custom entries
+                        if st.button("🗑️", key=f"del_{idx}_{actor}", help=f"Remove {actor} from combat"):
+                            st.session_state.manual_combatants.pop(idx - 1)
+                            st.rerun()
+                    else:
+                        st.caption("🔒 Static")
+                        
+    with col_add:
+        st.markdown("**Add Roster Reinforcements:**")
+        new_actor = st.text_input("Enter Combatant Name:", placeholder="Goblin Chieftain, Boss, Wild Card...", key="add_actor_name")
+        if st.button("➕ Inject Combatant to Roster", use_container_width=True):
+            if new_actor.strip() and new_actor not in full_combat_roster:
+                st.session_state.manual_combatants.append(new_actor.strip())
+                st.rerun()
+            elif not new_actor.strip():
+                st.error("Name field cannot be left blank!")
+            else:
+                st.warning("That combatant name is already active in turn rotation!")
+                
+        st.markdown("---")
+        if st.button("🔄 Complete Deck Reset & Shuffle", use_container_width=True, help="Re-gathers all discards and randomizes deck"):
             shuffle_deck()
             st.success("Deck completely gathered, cleared, and thoroughly shuffled!")
 
-    if st.session_state.hand:
-        st.markdown("---")
+    # --- ACTION OPERATION EXECUTION BUTTON ---
+    st.markdown("---")
+    if st.button("🃏 Deal Cards to Active Roster", type="primary", use_container_width=True):
+        if full_combat_roster:
+            deal_to_roster(full_combat_roster)
+        else:
+            st.error("Roster empty! Add combatants before dealing cards.")
+
+    # --- DISPLAY DEAL DELIVERIES ---
+    if st.session_state.hand_dict:
         st.subheader("🎴 Current Round Turn Card Manifest")
         
-        # Display cards horizontally for easy grouping
-        card_cols = st.columns(len(st.session_state.hand))
-        for idx, card in enumerate(st.session_state.hand):
+        # Build responsive column display tracking length of active combatant size
+        card_cols = st.columns(len(st.session_state.hand_dict))
+        
+        for idx, (actor_name, card_value) in enumerate(st.session_state.hand_dict.items()):
             with card_cols[idx]:
-                if "Joker" in card:
-                    st.markdown(f"⚡ **[COMBATANT #{idx+1}]**\n<div style='font-size:32px; background-color:#ff4b4b; text-align:center; padding:15px; border-radius:5px; color:white; font-weight:bold;'>{card}</div>", unsafe_allow_html=True)
+                if "Joker" in card_value:
+                    st.markdown(
+                        f"""
+                        <div style="background-color:#ff4b4b; text-align:center; padding:16px; border-radius:5px; color:white; font-family:sans-serif;">
+                            <strong style="font-size:14px; text-transform:uppercase; display:block; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.3); padding-bottom:4px;">{actor_name}</strong>
+                            <div style="font-size:28px; font-weight:bold; margin:10px 0;">{card_value}</div>
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
                 else:
-                    color = "#2f3136"
-                    if '♥' in card or '♦' in card:
-                        text_color = "#ff4b4b"
-                    else:
-                        text_color = "#ffffff"
-                    st.markdown(f"👤 **[COMBATANT #{idx+1}]**\n<div style='font-size:32px; background-color:{color}; color:{text_color}; text-align:center; padding:15px; border-radius:5px; border:1px solid #4a4a4a;'>{card}</div>", unsafe_allow_html=True)
+                    bg_box = "#1e1e24"
+                    # Match card suit colors natively
+                    suit_color = "#ff4b4b" if ('♥' in card_value or '♦' in card_value) else "#ffffff"
+                    st.markdown(
+                        f"""
+                        <div style="background-color:{bg_box}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; font-family:sans-serif;">
+                            <strong style="font-size:14px; text-transform:uppercase; color:#b9bbbe; display:block; margin-bottom:8px; border-bottom:1px solid #4a4a4a; padding-bottom:4px;">{actor_name}</strong>
+                            <div style="font-size:28px; font-weight:bold; color:{suit_color}; margin:10px 0;">{card_value}</div>
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
