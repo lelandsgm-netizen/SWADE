@@ -26,11 +26,13 @@ if "roll_history" not in st.session_state:
 if "manual_combatants" not in st.session_state:
     st.session_state.manual_combatants = [] 
 
-# NEW: Combat Round Tracking States
+# Combat Round Tracking States
 if "round_counter" not in st.session_state:
     st.session_state.round_counter = 0
 if "round_history" not in st.session_state:
-    st.session_state.round_history = [] # Stores list of (round_num, hand_dict)
+    st.session_state.round_history = [] 
+if "current_round_hands" not in st.session_state:
+    st.session_state.current_round_hands = {} # Core fixed memory container for active UI display
 
 # ==========================================
 #      CARD DEALER ENGINE ENGINE CORES
@@ -48,40 +50,44 @@ def shuffle_deck():
     random.shuffle(st.session_state.deck)
     st.session_state.discard = []
     st.session_state.joker_drawn = False
-    # Note: We don't reset the round_counter here, only on the explicit Clear button.
 
 if not st.session_state.deck and not st.session_state.discard:
     shuffle_deck()
 
 def get_card_weight(card_str):
+    """Assigns an absolute rule-accurate SWADE hierarchy value to any given card string."""
     if "Joker" in card_str:
-        return 999
+        return 9999 # Jokers dominate completely
+    
     val_part = card_str[:-1]
     suit_part = card_str[-1]
+    
     value_map = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14}
-    suit_map = {'♠':4, '♥':3, '♦':2, '♣':1}
-    return (value_map.get(val_part, 0) * 10) + suit_map.get(suit_part, 0)
+    suit_map = {'♠':4, '♥':3, '♦':2, '♣':1} # Spades > Hearts > Diamonds > Clubs
+    
+    # PATCHED: Multiplied face values by 100 so raw card number always dictates order over suit strings
+    return (value_map.get(val_part, 0) * 100) + suit_map.get(suit_part, 0)
 
 def deal_to_roster(roster_list):
-    current_round_hands = {}
+    hands = {}
     for actor in roster_list:
         if not st.session_state.deck:
-            # Auto-reshuffle if deck runs dry mid-deal
             shuffle_deck()
         card = st.session_state.deck.pop(0)
-        current_round_hands[actor] = card
+        hands[actor] = card
         if "Joker" in card:
             st.session_state.joker_drawn = True
             
-    # Sort by SWADE Hierarchy
-    sorted_hands = dict(sorted(current_round_hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
+    # Sort hands perfectly by corrected weight values
+    sorted_hands = dict(sorted(hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
     
-    # Increment Round and Log History
     st.session_state.round_counter += 1
-    st.session_state.round_history.insert(0, (st.session_state.round_counter, sorted_hands))
+    st.session_state.current_round_hands = sorted_hands
+    
+    # Store complete round snapshot as a list of item tuples to protect internal scope integrity
+    st.session_state.round_history.insert(0, (st.session_state.round_counter, list(sorted_hands.items())))
     st.session_state.discard.extend(sorted_hands.values())
     
-    # DISCORD broadcast including the Round Number
     send_initiative_to_discord(sorted_hands, st.session_state.round_counter)
 
 def send_initiative_to_discord(sorted_hands, round_num):
@@ -319,7 +325,7 @@ if app_mode == "🎲 Tactical Dice Console":
         for h_e, h_b in st.session_state.roll_history: render_stream_card(h_e, is_blind=h_b)
 
 # ==========================================
-#      VIEW 2: ACTION CARD DEALER (ROUND MANIFEST UPGRADE)
+#      VIEW 2: ACTION CARD DEALER (FIXED MANIFEST)
 # ==========================================
 else:
     st.header("🃏 Action Card Dealer")
@@ -351,23 +357,38 @@ else:
     st.markdown("---")
     st.subheader("📜 Round Manifest")
     
-    # NEW: The Clear History button located right below the Manifest title
     if st.button("🗑️ Clear Manifest & Reset Rounds", use_container_width=False):
         st.session_state.round_counter = 0
         st.session_state.round_history = []
+        st.session_state.current_round_hands = {}
         st.session_state.joker_drawn = False
         st.rerun()
 
     if st.session_state.round_history:
-        st.info("💡 Cards are sorted by SWADE hierarchy (Spades > Hearts > Diamonds > Clubs).")
+        st.info("💡 Cards are automatically sorted by SWADE value and suit hierarchy (Spades > Hearts > Diamonds > Clubs).")
         
-        # Display each round in the log
-        for r_num, hands in st.session_state.round_history:
+        # FIX: Explicit structural loops targeting structured scope definitions for layout stability
+        for r_num, hands_list in st.session_state.round_history:
             with st.expander(f"📅 ROUND {r_num} SUMMARY", expanded=(r_num == st.session_state.round_counter)):
-                cols = st.columns(len(hands))
-                for i, (name, card) in enumerate(hands.items()):
-                    with cols[i]:
-                        # Visual Logic: ACTING #1 start, Joker styling, and suit coloring
-                        badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{i+1}</div>"
+                cols = st.columns(len(hands_list))
+                for idx, (name, card) in enumerate(hands_list):
+                    with cols[idx]:
+                        # Visual Logic: Display proper ACTING # sequence string (1-indexed base)
+                        badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{idx+1}</div>"
                         is_joker = "Joker" in card
-                        bg = "#ff4b4b"
+                        bg = "#ff4b4b" if is_joker else "#1e1e24"
+                        suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+                        
+                        st.markdown(
+                            f"""
+                            <div style="background-color:{bg}; text-align:center; padding:12px; border-radius:5px; border:1px solid #4a4a4a; min-height:120px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;">
+                                    <strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:90px;">{name}</strong>
+                                    {badge}
+                                </div>
+                                <div style="font-size:24px; font-weight:bold; color:{suit_c};">{card}</div>
+                            </div>
+                            """, unsafe_allow_html=True
+                        )
+    else:
+        st.caption("Manifest empty. Deal cards to begin Round 1.")
