@@ -241,3 +241,135 @@ if st.session_state.view_mode == "GM Dashboard":
                 suit_color = "white" if "Joker" in card else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
                 badge_type = "PLAYER" if name in active_pcs else "NPC"
                 badge_bg = "#3b66a6" if badge_type == "PLAYER" else "#ff4b4b"
+                
+                st.markdown(
+                    f"""
+                    <div style="background-color:{card_bg}; padding:14px 20px; border-radius:8px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; border:1px solid #4a4a4a;">
+                        <div>
+                            <span style="background-color:rgba(255,255,255,0.15); color:white; font-size:11px; padding:2px 6px; border-radius:3px; font-weight:bold; margin-right:10px;">#{idx+1}</span>
+                            <strong style="font-size:16px; color:white;">{name}</strong>
+                            <span style="background-color:{badge_bg}; color:white; font-size:9px; padding:2px 5px; border-radius:3px; font-weight:bold; margin-left:8px; vertical-align:middle;">{badge_type}</span>
+                        </div>
+                        <div style="font-size:22px; font-weight:bold; color:{suit_color};">{card}</div>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+        else:
+            st.warning("No active turn tracker generated yet. Populate your tactical roster and cycle the dealer deck!")
+
+# ==========================================
+# 📱 VIEW 2: THE DYNAMIC PLAYER INTEGRATION
+# ==========================================
+elif st.session_state.view_mode == "Player View":
+    st.title("📱 Player Synch Workspace")
+    
+    # 📑 PLAYER SUB-TABS: SPLIT BETWEEN INITIATIVE LOOKUP & DICE ROLLER
+    tab_init, tab_dice = st.tabs(["📡 Live Initiative Feed", "🎲 Action Dice Roller & Macros"])
+    
+    with tab_init:
+        col_p1, col_p2 = st.columns([1, 2])
+        with col_p1:
+            player_join_name = st.text_input("Enter Character Name:", value="", max_chars=20, key="join_name_fld").strip()
+        with col_p2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔗 Synch Character Connection", type="primary", use_container_width=True):
+                if player_join_name and player_join_name not in active_pcs:
+                    active_pcs.append(player_join_name)
+                    push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
+                    st.success(f"'{player_join_name}' successfully broadcast to GM Tactical Grid!")
+                    st.rerun()
+                    
+        st.markdown("---")
+        
+        if room_data and room_data.get("sorted_hands"):
+            manifest_wrapper = room_data.get("sorted_hands", {})
+            hands_map = manifest_wrapper.get("hands", {})
+            current_round = room_data.get("round", 1)
+            is_j_active = room_data.get("joker_drawn", False)
+            
+            st.subheader(f"🎴 Live Battle Manifest: Round {current_round}")
+            if is_j_active:
+                st.error("🚨 A JOKER HAS BEEN UNLEASHED! ADVANTAGE MECHANICS ENGAGED. 🚨")
+                
+            st.markdown(
+                """
+                <style>
+                .mobile-card-container { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding: 10px 4px; -webkit-overflow-scrolling: touch; }
+                .mobile-initiative-card { flex: 0 0 140px; text-align: center; padding: 14px; border-radius: 6px; border: 1px solid #4a4a4a; min-height: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+                .mobile-card-container::-webkit-scrollbar { display: none; }
+                </style>
+                """, unsafe_allow_html=True
+            )
+            
+            html_carousel = '<div class="mobile-card-container">'
+            for idx, (name, card) in enumerate(hands_map.items()):
+                badge_lbl = "PLAYER" if name in active_pcs else "NPC"
+                badge_color = "#3b66a6" if badge_lbl == "PLAYER" else "#ff4b4b"
+                is_joker_card = "Joker" in card
+                bg_card_hex = "#ff4b4b" if is_joker_card else "#1e1e24"
+                suit_text_hex = "white" if is_joker_card else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+                
+                html_carousel += f"""
+                <div class="mobile-initiative-card" style="background-color: {bg_card_hex};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;">
+                        <strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;">{name}</strong>
+                        <span style="background-color:{badge_color}; color:white; font-size:8px; padding:1px 3px; border-radius:2px; font-weight:bold;">#{idx+1}</span>
+                    </div>
+                    <div style="font-size:26px; font-weight:bold; color:{suit_text_hex}; margin-top:8px;">{card}</div>
+                </div>
+                """
+            html_carousel += '</div>'
+            st.markdown(html_carousel, unsafe_allow_html=True)
+            st.info("📱 Swipe horizontally across the cards to view the complete turn order sequence.")
+        else:
+            st.warning("Waiting for the Game Master to deal cards for this session...")
+
+    with tab_dice:
+        st.subheader("🎲 Savage Worlds Trait & Damage Roller")
+        
+        c_roll1, c_roll2, c_roll3 = st.columns([1, 1, 1])
+        with c_roll1:
+            trait_die = st.selectbox("Trait Die (Skill/Attribute):", ["d4", "d6", "d8", "d10", "d12"], index=1)
+        with c_roll2:
+            wild_die = st.selectbox("Wild Die Selection:", ["d6", "None"], index=0)
+            w_pass = None if wild_die == "None" else wild_die
+        with c_roll3:
+            mod_val = st.number_input("Static Modifier (+/-):", value=0, step=1)
+            
+        if st.button("🔥 Execute Trait Check", type="primary", use_container_width=True):
+            roll_result = execute_swade_roll(trait_die, w_pass, mod_val)
+            st.session_state.dice_log.insert(0, roll_result)
+            
+        st.markdown("---")
+        st.subheader("⚔️ Direct Weapon Macro Launchpad")
+        
+        # Fast configuration macros for quick targeting at the physical table
+        macro_cols = st.columns(3)
+        with macro_cols[0]:
+            if st.button("🗡️ Fighting (d8 vs d6)", use_container_width=True):
+                st.session_state.dice_log.insert(0, "⚔️ **Fighting Attack:**\n" + execute_swade_roll("d8", "d6", 0))
+        with macro_cols[1]:
+            if st.button("🏹 Shooting (d6 vs d6 + 1)", use_container_width=True):
+                st.session_state.dice_log.insert(0, "🎯 **Shooting Attack:**\n" + execute_swade_roll("d6", "d6", 1))
+        with macro_cols[2]:
+            if st.button("💥 Greatsword Damage (2d10)", use_container_width=True):
+                # Damage rolls in SWADE do not use a wild die
+                st.session_state.dice_log.insert(0, "💥 **Greatsword Damage Output:**\n" + execute_swade_roll("d10", None, 0) + "\n" + execute_swade_roll("d10", None, 0))
+                
+        # 📜 LIVE LOCAL DICE LOG CONSOLE
+        if st.session_state.dice_log:
+            st.markdown("### 📜 Table Roll History Console")
+            if st.button("🗑️ Clear Log Console", use_container_width=True):
+                st.session_state.dice_log = []
+                st.rerun()
+            for log in st.session_state.dice_log:
+                st.info(log)
+
+# ==========================================
+# 🌌 VIEW 3: THE PRIVATE LANDING DESK
+# ==========================================
+else:
+    st.title("🌌 Steele & Sorcery Campaign Terminal")
+    st.write("Welcome to the operational gateway for the RPG Legends tabletop crew.")
+    st.markdown("---")
+    st.info("👈 Open the sidebar operation terminal to launch the GM Tactical Command Center or connect a Player Sync device browser panel!")
