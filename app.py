@@ -46,7 +46,7 @@ def get_card_value(card):
 # 🎲 SAVAGE WORLDS EXPLODING DICE LOGIC
 # ==========================================
 
-def roll_savage_die(sides, is_wild=False):
+def roll_savage_die(sides):
     """Rolls a single die with infinite SWADE explosions if maximum value is hit."""
     if sides < 2: 
         return [0], 0
@@ -70,8 +70,7 @@ def execute_swade_roll(trait_str, wild_str="d6", modifier=0):
     t_rolls, t_total = roll_savage_die(t_sides)
     
     if w_sides > 0:
-        w_rolls, w_total = roll_savage_die(w_sides, is_wild=True)
-        # Apply static modifier to the highest base engine result
+        w_rolls, w_total = roll_savage_die(w_sides)
         highest_base = max(t_total, w_total)
         final_total = highest_base + modifier
         
@@ -176,7 +175,8 @@ st.markdown(
 if st.session_state.view_mode == "GM Dashboard":
     st.title("🛡️ GM Tactical Command Centre")
     
-    col_left, col_right = st.columns([1, 2])
+    # 3-Column structural layout grid split
+    col_left, col_center, col_right = st.columns([1.2, 1.8, 1.2])
     
     with col_left:
         st.subheader("👥 Tactical Roster")
@@ -217,7 +217,7 @@ if st.session_state.view_mode == "GM Dashboard":
                         push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                         st.rerun()
                         
-    with col_right:
+    with col_center:
         st.subheader("🎴 Live Battle Manifest Order")
         
         if st.button("🎲 Deal Action Cards & Advance Round", type="primary", use_container_width=True):
@@ -257,13 +257,43 @@ if st.session_state.view_mode == "GM Dashboard":
         else:
             st.warning("No active turn tracker generated yet. Populate your tactical roster and cycle the dealer deck!")
 
+    # 🎲 ANCHORED GM DICE LAUNCHPAD WINDOW
+    with col_right:
+        st.subheader("🎲 GM Dice Shield")
+        
+        gm_trait = st.selectbox("GM Trait Die:", ["d4", "d6", "d8", "d10", "d12"], index=1, key="gm_trait_select")
+        gm_wild = st.selectbox("Wild Die Type:", ["d6", "None (Extra/Mook)"], index=1, key="gm_wild_select")
+        gm_w_pass = None if "None" in gm_wild else "d6"
+        gm_mod = st.number_input("Modifier:", value=0, step=1, key="gm_mod_input")
+        
+        if st.button("🎲 Roll GM Action", type="primary", use_container_width=True, key="gm_roll_btn"):
+            roll_result = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
+            st.session_state.dice_log.insert(0, f"🔮 **GM Roll:**\n{roll_result}")
+            
+        st.markdown("---")
+        st.caption("🧟 Quick NPC Attack Macros")
+        
+        if st.button("🧟 Zombie Claw (d6 vs No Wild)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "🧟 **Zombie Bite/Claw:**\n" + execute_swade_roll("d6", None, 0))
+            
+        if st.button("⚔️ Wild Card Boss (d8 vs d6)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "😈 **Wild Card NPC Attack:**\n" + execute_swade_roll("d8", "d6", 0))
+
+        if st.session_state.dice_log:
+            st.markdown("### 📜 Roll Logs")
+            if st.button("🗑️ Clear Logs", use_container_width=True, key="gm_clear_logs"):
+                st.session_state.dice_log = []
+                st.rerun()
+            for log in st.session_state.dice_log:
+                st.info(log)
+
 # ==========================================
-# 📱 VIEW 2: THE DYNAMIC PLAYER INTEGRATION
+# 📱 VIEW 2: THE MOBILE PLAYER WORKSPACE
 # ==========================================
 elif st.session_state.view_mode == "Player View":
     st.title("📱 Player Synch Workspace")
     
-    # 📑 PLAYER SUB-TABS: SPLIT BETWEEN INITIATIVE LOOKUP & DICE ROLLER
+    # Structural separation tab tracks
     tab_init, tab_dice = st.tabs(["📡 Live Initiative Feed", "🎲 Action Dice Roller & Macros"])
     
     with tab_init:
@@ -289,7 +319,7 @@ elif st.session_state.view_mode == "Player View":
             
             st.subheader(f"🎴 Live Battle Manifest: Round {current_round}")
             if is_j_active:
-                st.error("🚨 A JOKER HAS BEEN UNLEASHED! ADVANTAGE MECHANICS ENGAGED. 🚨")
+                st.error("🚨 A JOKER HAS BEEN UNLEASHED! INITIATIVE ADVANTAGE ENGAGED. 🚨")
                 
             st.markdown(
                 """
@@ -343,7 +373,6 @@ elif st.session_state.view_mode == "Player View":
         st.markdown("---")
         st.subheader("⚔️ Direct Weapon Macro Launchpad")
         
-        # Fast configuration macros for quick targeting at the physical table
         macro_cols = st.columns(3)
         with macro_cols[0]:
             if st.button("🗡️ Fighting (d8 vs d6)", use_container_width=True):
@@ -353,10 +382,8 @@ elif st.session_state.view_mode == "Player View":
                 st.session_state.dice_log.insert(0, "🎯 **Shooting Attack:**\n" + execute_swade_roll("d6", "d6", 1))
         with macro_cols[2]:
             if st.button("💥 Greatsword Damage (2d10)", use_container_width=True):
-                # Damage rolls in SWADE do not use a wild die
                 st.session_state.dice_log.insert(0, "💥 **Greatsword Damage Output:**\n" + execute_swade_roll("d10", None, 0) + "\n" + execute_swade_roll("d10", None, 0))
                 
-        # 📜 LIVE LOCAL DICE LOG CONSOLE
         if st.session_state.dice_log:
             st.markdown("### 📜 Table Roll History Console")
             if st.button("🗑️ Clear Log Console", use_container_width=True):
