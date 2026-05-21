@@ -12,25 +12,14 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 🌟 CRITICAL FIX: Session-Lock tracking to force a clean slate on browser open
-if "session_initialized" not in st.session_state:
-    st.session_state.session_initialized = True
+if "room_code" not in st.session_state:
     st.session_state.room_code = "RPGL"
+if "view_mode" not in st.session_state:
     st.session_state.view_mode = "GM Dashboard"
+if "npc_input_name" not in st.session_state:
     st.session_state.npc_input_name = ""
+if "dice_log" not in st.session_state:
     st.session_state.dice_log = []
-    
-    # Force wipe the database row for this room immediately on fresh browser launch
-    try:
-        supabase.table("combat_sessions").update({
-            "player_characters": json.dumps([]),
-            "gm_npcs": json.dumps([]),
-            "sorted_hands": {"hands": {}},
-            "round": 1,
-            "joker_drawn": False
-        }).eq("room_code", "RPGL").execute()
-    except:
-        pass
 
 def generate_fresh_deck():
     suits = ['♠', '♥', '♦', '♣']
@@ -148,7 +137,7 @@ if st.sidebar.button("📱 Launch Player Table Sync", use_container_width=True):
     st.session_state.view_mode = "Player View"
     st.rerun()
 
-# Read live parameters straight from DB text fields
+# Download layout real-estate variables from Supabase
 room_data = pull_room_state_from_db(st.session_state.room_code)
 active_pcs = json.loads(room_data.get("player_characters")) if room_data and room_data.get("player_characters") else []
 active_npcs = json.loads(room_data.get("gm_npcs")) if room_data and room_data.get("gm_npcs") else []
@@ -174,7 +163,7 @@ if st.session_state.view_mode == "GM Dashboard":
     st.caption(f"Connected to Room Code: **{st.session_state.room_code}**")
     
     # --------------------------------------
-    # 🎴 SECTION 1: MASTER INITIATIVE TRACKER
+    # 📑 SECTION 1: MASTER INITIATIVE TRACKER
     # --------------------------------------
     st.markdown("## 🎴 Live Battle Manifest Order")
     
@@ -269,7 +258,8 @@ if st.session_state.view_mode == "GM Dashboard":
         res = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
         st.session_state.dice_log.insert(0, res)
         
-    st.caption("微 Fast Quick-Strike Attack Tracks")
+    # Attack Macros
+    st.caption("🧟 Fast Quick-Strike Attack Tracks")
     c_m1, c_m2 = st.columns(2)
     with c_m1:
         if st.button("🧟 Zombie Scratch (d6 No Wild)", use_container_width=True):
