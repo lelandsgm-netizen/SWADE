@@ -137,7 +137,7 @@ if st.sidebar.button("📱 Launch Player Table Sync", use_container_width=True):
     st.session_state.view_mode = "Player View"
     st.rerun()
 
-# 📥 DOWNLOAD DIRECTLY FROM DB TEXT FIELDS (No Local Session Cache Restraints)
+# 📥 SYSTEM UPDATE: Pulling active arrays directly from the new DB text columns
 room_data = pull_room_state_from_db(st.session_state.room_code)
 active_pcs = json.loads(room_data.get("player_characters")) if room_data and room_data.get("player_characters") else []
 active_npcs = json.loads(room_data.get("gm_npcs")) if room_data and room_data.get("gm_npcs") else []
@@ -212,12 +212,12 @@ if st.session_state.view_mode == "GM Dashboard":
     if st.button("➕ Add Threat to Room", use_container_width=True):
         if new_npc and new_npc not in active_npcs:
             active_npcs.append(new_npc)
-            # 💾 DIRECT SUPABASE PERSISTENCE WRITE
+            # 💾 SYSTEM UPDATE: Saved straight to DB text column instead of cache
             push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
             st.session_state.npc_input_name = ""
             st.rerun()
             
-    # Display Player Characters with dynamic color frames
+    # Display Player Characters
     if active_pcs:
         st.caption("🛡️ Active Player Characters")
         for pc in active_pcs:
@@ -227,10 +227,11 @@ if st.session_state.view_mode == "GM Dashboard":
             with c_del:
                 if st.button("🗑️", key=f"del_pc_{pc}", use_container_width=True):
                     active_pcs.remove(pc)
+                    # 💾 SYSTEM UPDATE: Updated straight to DB text column instead of cache
                     push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                     st.rerun()
 
-    # Display NPCs with dynamic crimson frames
+    # Display NPCs
     if active_npcs:
         st.caption("🚨 Active Threat Targets")
         for npc in active_npcs:
@@ -240,6 +241,7 @@ if st.session_state.view_mode == "GM Dashboard":
             with c_del:
                 if st.button("🗑️", key=f"del_npc_{npc}", use_container_width=True):
                     active_npcs.remove(npc)
+                    # 💾 SYSTEM UPDATE: Updated straight to DB text column instead of cache
                     push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                     st.rerun()
 
@@ -259,7 +261,8 @@ if st.session_state.view_mode == "GM Dashboard":
         res = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
         st.session_state.dice_log.insert(0, res)
         
-    st.caption("🧟 Fast Quick-Strike Attack Tracks")
+    # Attack Macros
+    st.caption("微 Fast Quick-Strike Attack Tracks")
     c_m1, c_m2 = st.columns(2)
     with c_m1:
         if st.button("🧟 Zombie Scratch (d6 No Wild)", use_container_width=True):
@@ -289,7 +292,7 @@ else:
         if st.button("🔗 Synch Connection to Table", type="primary", use_container_width=True):
             if p_name and p_name not in active_pcs:
                 active_pcs.append(p_name)
-                # 💾 DIRECT PLAYER REGISTRATION PERSISTENCE WRITE TO DB TEXT COLUMN
+                # 💾 SYSTEM UPDATE: Saved straight to DB text column instead of cache
                 push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                 st.success(f"Connected '{p_name}' successfully!")
                 st.rerun()
