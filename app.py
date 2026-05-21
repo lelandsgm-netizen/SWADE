@@ -8,22 +8,19 @@ import re
 # 🔌 DATABASE & CORE ENGINE INITIALIZATION
 # ==========================================
 
-# Securely extract your Supabase API connections
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Initialize standard local fallbacks for initialization protection
 if "room_code" not in st.session_state:
     st.session_state.room_code = "RPGL"
 if "view_mode" not in st.session_state:
-    st.session_state.view_mode = "Landing Hub"
+    st.session_state.view_mode = "GM Dashboard"
 if "npc_input_name" not in st.session_state:
     st.session_state.npc_input_name = ""
 if "dice_log" not in st.session_state:
     st.session_state.dice_log = []
 
-# Define the complete Savage Worlds Action Deck
 def generate_fresh_deck():
     suits = ['♠', '♥', '♦', '♣']
     values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
@@ -32,7 +29,6 @@ def generate_fresh_deck():
     deck.append("🃏 Joker (Black)")
     return deck
 
-# Strict card value hierarchy for SWADE initiative accuracy
 def get_card_value(card):
     if "Joker" in card:
         return 999  
@@ -47,25 +43,20 @@ def get_card_value(card):
 # ==========================================
 
 def roll_savage_die(sides):
-    """Rolls a single die with infinite SWADE explosions if maximum value is hit."""
-    if sides < 2: 
-        return [0], 0
-    
+    if sides < 2: return [0], 0
     rolls = []
     while True:
         roll = random.randint(1, sides)
         rolls.append(roll)
-        if roll != sides:
-            break
+        if roll != sides: break
     return rolls, sum(rolls)
 
 def execute_swade_roll(trait_str, wild_str="d6", modifier=0):
-    """Executes a trait die vs wild die roll with accurate mathematical parsing."""
     try:
         t_sides = int(re.findall(r'\d+', trait_str)[0])
         w_sides = int(re.findall(r'\d+', wild_str)[0]) if wild_str else 0
     except:
-        return "Format Error! Use formats like 'd8'."
+        return "Format Error!"
         
     t_rolls, t_total = roll_savage_die(t_sides)
     
@@ -73,29 +64,23 @@ def execute_swade_roll(trait_str, wild_str="d6", modifier=0):
         w_rolls, w_total = roll_savage_die(w_sides)
         highest_base = max(t_total, w_total)
         final_total = highest_base + modifier
-        
-        result_msg = (
-            f"🎲 **Trait {trait_str}** (Rolled {t_rolls} = {t_total}) | "
-            f"**Wild {wild_str}** (Rolled {w_rolls} = {w_total})\n\n"
-            f"🔥 **Highest Base:** {highest_base} + Mod ({modifier}) = **{final_total}**"
-        )
+        result_msg = f"🎲 **{trait_str} vs {wild_str}**: {t_rolls} | Wild: {w_rolls} + Mod ({modifier}) = **{final_total}**"
     else:
         final_total = t_total + modifier
-        result_msg = f"🎲 **Damage Roll {trait_str}:** Rolled {t_rolls} + Mod ({modifier}) = **{final_total}**"
+        result_msg = f"💥 **Damage {trait_str}**: {t_rolls} + Mod ({modifier}) = **{final_total}**"
         
     return result_msg
 
 # ==========================================
-# 📡 CLOUD STORAGE PIPELINE FUNCTIONS (SUPABASE)
+# 📡 CLOUD STORAGE PIPELINE FUNCTIONS
 # ==========================================
 
 def pull_room_state_from_db(room_code):
     try:
         response = supabase.table("combat_sessions").select("*").eq("room_code", room_code.upper()).execute()
-        if response.data:
-            return response.data[0]
-    except Exception as e:
-        st.error(f"Cloud Read Failure: {e}")
+        if response.data: return response.data[0]
+    except:
+        pass
     return None
 
 def push_rosters_to_db(room_code, pc_list, npc_list):
@@ -105,11 +90,11 @@ def push_rosters_to_db(room_code, pc_list, npc_list):
             "gm_npcs": json.dumps(npc_list)
         }).eq("room_code", room_code.upper()).execute()
     except Exception as e:
-        st.error(f"Cloud Roster Update Failure: {e}")
+        st.error(f"Roster Sync Failed: {e}")
 
 def deal_new_round_to_db(room_code, pcs, npcs):
     current_state = pull_room_state_from_db(room_code)
-    next_round = (current_state.get("round", 1) or 1) + 1 if current_state else 1
+    next_round = (current_state.get("round", 0) or 0) + 1 if current_state else 1
     
     deck = generate_fresh_deck()
     random.shuffle(deck)
@@ -124,8 +109,7 @@ def deal_new_round_to_db(room_code, pcs, npcs):
             random.shuffle(deck)
         card = deck.pop()
         new_hands[combatant] = card
-        if "Joker" in card:
-            joker_found = True
+        if "Joker" in card: joker_found = True
             
     sorted_deal = dict(sorted(new_hands.items(), key=lambda item: get_card_value(item[1]), reverse=True))
     
@@ -136,196 +120,193 @@ def deal_new_round_to_db(room_code, pcs, npcs):
             "joker_drawn": joker_found
         }).eq("room_code", room_code.upper()).execute()
     except Exception as e:
-        st.error(f"Cloud Deal Failure: {e}")
+        st.error(f"Deal Sync Failed: {e}")
 
 # ==========================================
 # 📊 USER INTERFACE & NAVIGATION SIDEBAR
 # ==========================================
 
 st.sidebar.title("⚔️ Steele & Sorcery Core")
-room_input = st.sidebar.text_input("Active Campaign Room Code:", value=st.session_state.room_code, max_chars=6).upper()
+room_input = st.sidebar.text_input("Active Room Code:", value=st.session_state.room_code, max_chars=6).upper()
 st.session_state.room_code = room_input
 
-if st.sidebar.button("🛡️ Launch GM Combat Dashboard", use_container_width=True):
+if st.sidebar.button("🛡️ Launch GM Dashboard", use_container_width=True):
     st.session_state.view_mode = "GM Dashboard"
+    st.rerun()
 if st.sidebar.button("📱 Launch Player Table Sync", use_container_width=True):
     st.session_state.view_mode = "Player View"
+    st.rerun()
 
-# Pull down active table rows from Supabase
+# Download layout real-estate variables from Supabase
 room_data = pull_room_state_from_db(st.session_state.room_code)
 active_pcs = json.loads(room_data.get("player_characters")) if room_data and room_data.get("player_characters") else []
 active_npcs = json.loads(room_data.get("gm_npcs")) if room_data and room_data.get("gm_npcs") else []
 
-# Custom colored border styling rules
+# Custom CSS Styles Injection
 st.markdown(
     """
     <style>
-    .roster-box { padding: 12px 16px; margin-bottom: 10px; border-radius: 6px; background-color: #1a1a1e; display: flex; justify-content: space-between; align-items: center; }
-    .pc-style { border-left: 5px solid #3b66a6; border-top: 1px solid #232834; border-right: 1px solid #232834; border-bottom: 1px solid #232834; }
-    .npc-style { border-left: 5px solid #ff4b4b; border-top: 1px solid #232834; border-right: 1px solid #232834; border-bottom: 1px solid #232834; }
+    .roster-box { padding: 12px 16px; margin-bottom: 8px; border-radius: 6px; background-color: #1c212b; display: flex; justify-content: space-between; align-items: center; border: 1px solid #2d3545; }
+    .pc-style { border-left: 5px solid #3b66a6; }
+    .npc-style { border-left: 5px solid #ff4b4b; }
     .roster-text { color: #ffffff; font-weight: 600; font-size: 15px; }
-    .badge { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
+    .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True
 )
 
 # ==========================================
-# 🛡️ VIEW 1: THE GM COMBAT COCKPIT
+# 🛡️ VIEW 1: THE GM COMBAT DASHBOARD
 # ==========================================
 if st.session_state.view_mode == "GM Dashboard":
     st.title("🛡️ GM Tactical Command Centre")
+    st.caption(f"Connected to Room Code: **{st.session_state.room_code}**")
     
-    # 3-Column structural layout grid split
-    col_left, col_center, col_right = st.columns([1.2, 1.8, 1.2])
+    # --------------------------------------
+    # 📑 SECTION 1: MASTER INITIATIVE TRACKER
+    # --------------------------------------
+    st.markdown("## 🎴 Live Battle Manifest Order")
     
-    with col_left:
-        st.subheader("👥 Tactical Roster")
+    if st.button("🎲 Deal Cards & Advance Round", type="primary", use_container_width=True):
+        deal_new_round_to_db(st.session_state.room_code, active_pcs, active_npcs)
+        st.rerun()
         
-        new_npc = st.text_input("Register New NPC/Mook Name:", value=st.session_state.npc_input_name, key="npc_entry").strip()
-        if st.button("➕ Inject NPC into Grid", use_container_width=True):
-            if new_npc and new_npc not in active_npcs:
-                active_npcs.append(new_npc)
-                push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
-                st.session_state.npc_input_name = ""
-                st.rerun()
-                
-        st.markdown("---")
+    if room_data and room_data.get("sorted_hands"):
+        manifest_wrapper = room_data.get("sorted_hands", {})
+        hands_map = manifest_wrapper.get("hands", {})
+        current_round = room_data.get("round", 1)
         
-        if active_pcs:
-            st.caption("🛡️ Active Wild Cards (Players)")
-            for pc in active_pcs:
-                col_p_text, col_p_del = st.columns([5, 1])
-                with col_p_text:
-                    st.markdown(f'<div class="roster-box pc-style"><span class="roster-text">{pc}</span><span class="badge" style="background-color: rgba(59,102,166,0.2); color:#7d8bff;">PLAYER</span></div>', unsafe_allow_html=True)
-                with col_p_del:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("🗑️", key=f"del_pc_{pc}"):
-                        active_pcs.remove(pc)
-                        push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
-                        st.rerun()
-
-        if active_npcs:
-            st.caption("🚨 Threat Matrix Forces (NPCs)")
-            for npc in active_npcs:
-                col_n_text, col_n_del = st.columns([5, 1])
-                with col_n_text:
-                    st.markdown(f'<div class="roster-box npc-style"><span class="roster-text">{npc}</span><span class="badge" style="background-color: rgba(255,75,75,0.2); color:#ff4b4b;">NPC</span></div>', unsafe_allow_html=True)
-                with col_n_del:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("🗑️", key=f"del_npc_{npc}"):
-                        active_npcs.remove(npc)
-                        push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
-                        st.rerun()
-                        
-    with col_center:
-        st.subheader("🎴 Live Battle Manifest Order")
+        st.markdown(f"### 📋 Current Turn Order: **Round {current_round}**")
+        if room_data.get("joker_drawn", False):
+            st.error("🚨 JOKER UNLEASHED! +1 to Trait and Damage rolls for those holding the Wild Card! 🚨")
+            
+        for idx, (name, card) in enumerate(hands_map.items()):
+            card_bg = "#ff4b4b" if "Joker" in card else "#1c212b"
+            suit_color = "white" if "Joker" in card else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+            b_lbl = "PLAYER" if name in active_pcs else "NPC"
+            b_bg = "#3b66a6" if b_lbl == "PLAYER" else "#ff4b4b"
+            
+            st.markdown(
+                f"""
+                <div style="background-color:{card_bg}; padding:14px; border-radius:8px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border:1px solid #2d3545;">
+                    <div>
+                        <span style="background-color:rgba(255,255,255,0.15); color:white; font-size:11px; padding:2px 6px; border-radius:3px; font-weight:bold; margin-right:10px;">#{idx+1}</span>
+                        <strong style="font-size:16px; color:white;">{name}</strong>
+                        <span style="background-color:{b_bg}; color:white; font-size:9px; padding:2px 5px; border-radius:3px; font-weight:bold; margin-left:8px;">{b_lbl}</span>
+                    </div>
+                    <div style="font-size:20px; font-weight:bold; color:{suit_color};">{card}</div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+    else:
+        st.warning("No active cards are out on the field. Populate the roster below and deal a round!")
         
-        if st.button("🎲 Deal Action Cards & Advance Round", type="primary", use_container_width=True):
-            deal_new_round_to_db(st.session_state.room_code, active_pcs, active_npcs)
+    st.markdown("---")
+    
+    # --------------------------------------
+    # 👥 SECTION 2: ROSTER CREATION SHIELD
+    # --------------------------------------
+    st.markdown("## 👥 Tactical Combat Roster")
+    
+    new_npc = st.text_input("Enter NPC / Threat Name:", value=st.session_state.npc_input_name, key="npc_entry").strip()
+    if st.button("➕ Add Threat to Room", use_container_width=True):
+        if new_npc and new_npc not in active_npcs:
+            active_npcs.append(new_npc)
+            push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
+            st.session_state.npc_input_name = ""
             st.rerun()
             
-        st.markdown("---")
-        
-        if room_data and room_data.get("sorted_hands"):
-            manifest_wrapper = room_data.get("sorted_hands", {})
-            hands_map = manifest_wrapper.get("hands", {})
-            current_round = room_data.get("round", 1)
-            is_j_active = room_data.get("joker_drawn", False)
-            
-            st.markdown(f"### 📋 Current Combat Sequence: **Round {current_round}**")
-            if is_j_active:
-                st.error("🚨 JOKER UNLEASHED! ALL WILD CARDS GAIN +1 TO ALL TRAIT AND DAMAGE ROLLS! 🚨")
-                
-            for idx, (name, card) in enumerate(hands_map.items()):
-                card_bg = "#ff4b4b" if "Joker" in card else "#1e1e24"
-                suit_color = "white" if "Joker" in card else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
-                badge_type = "PLAYER" if name in active_pcs else "NPC"
-                badge_bg = "#3b66a6" if badge_type == "PLAYER" else "#ff4b4b"
-                
-                st.markdown(
-                    f"""
-                    <div style="background-color:{card_bg}; padding:14px 20px; border-radius:8px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; border:1px solid #4a4a4a;">
-                        <div>
-                            <span style="background-color:rgba(255,255,255,0.15); color:white; font-size:11px; padding:2px 6px; border-radius:3px; font-weight:bold; margin-right:10px;">#{idx+1}</span>
-                            <strong style="font-size:16px; color:white;">{name}</strong>
-                            <span style="background-color:{badge_bg}; color:white; font-size:9px; padding:2px 5px; border-radius:3px; font-weight:bold; margin-left:8px; vertical-align:middle;">{badge_type}</span>
-                        </div>
-                        <div style="font-size:22px; font-weight:bold; color:{suit_color};">{card}</div>
-                    </div>
-                    """, unsafe_allow_html=True
-                )
-        else:
-            st.warning("No active turn tracker generated yet. Populate your tactical roster and cycle the dealer deck!")
+    # Display Player Characters
+    if active_pcs:
+        st.caption("🛡️ Active Player Characters")
+        for pc in active_pcs:
+            c_txt, c_del = st.columns([6, 1])
+            with c_txt:
+                st.markdown(f'<div class="roster-box pc-style"><span class="roster-text">{pc}</span><span class="badge" style="background-color:rgba(59,102,166,0.2); color:#7d8bff;">PLAYER</span></div>', unsafe_allow_html=True)
+            with c_del:
+                if st.button("🗑️", key=f"del_pc_{pc}", use_container_width=True):
+                    active_pcs.remove(pc)
+                    push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
+                    st.rerun()
 
-    # 🎲 ANCHORED GM DICE LAUNCHPAD WINDOW
-    with col_right:
-        st.subheader("🎲 GM Dice Shield")
-        
-        gm_trait = st.selectbox("GM Trait Die:", ["d4", "d6", "d8", "d10", "d12"], index=1, key="gm_trait_select")
-        gm_wild = st.selectbox("Wild Die Type:", ["d6", "None (Extra/Mook)"], index=1, key="gm_wild_select")
-        gm_w_pass = None if "None" in gm_wild else "d6"
-        gm_mod = st.number_input("Modifier:", value=0, step=1, key="gm_mod_input")
-        
-        if st.button("🎲 Roll GM Action", type="primary", use_container_width=True, key="gm_roll_btn"):
-            roll_result = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
-            st.session_state.dice_log.insert(0, f"🔮 **GM Roll:**\n{roll_result}")
-            
-        st.markdown("---")
-        st.caption("🧟 Quick NPC Attack Macros")
-        
-        if st.button("🧟 Zombie Claw (d6 vs No Wild)", use_container_width=True):
-            st.session_state.dice_log.insert(0, "🧟 **Zombie Bite/Claw:**\n" + execute_swade_roll("d6", None, 0))
-            
-        if st.button("⚔️ Wild Card Boss (d8 vs d6)", use_container_width=True):
-            st.session_state.dice_log.insert(0, "😈 **Wild Card NPC Attack:**\n" + execute_swade_roll("d8", "d6", 0))
+    # Display NPCs
+    if active_npcs:
+        st.caption("🚨 Active Threat Targets")
+        for npc in active_npcs:
+            c_txt, c_del = st.columns([6, 1])
+            with c_txt:
+                st.markdown(f'<div class="roster-box npc-style"><span class="roster-text">{npc}</span><span class="badge" style="background-color:rgba(255,75,75,0.2); color:#ff4b4b;">NPC</span></div>', unsafe_allow_html=True)
+            with c_del:
+                if st.button("🗑️", key=f"del_npc_{npc}", use_container_width=True):
+                    active_npcs.remove(npc)
+                    push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
+                    st.rerun()
 
-        if st.session_state.dice_log:
-            st.markdown("### 📜 Roll Logs")
-            if st.button("🗑️ Clear Logs", use_container_width=True, key="gm_clear_logs"):
-                st.session_state.dice_log = []
-                st.rerun()
-            for log in st.session_state.dice_log:
-                st.info(log)
+    st.markdown("---")
+
+    # --------------------------------------
+    # 🎲 SECTION 3: GM SCREEN DICE TRAY
+    # --------------------------------------
+    st.markdown("## 🎲 GM Operational Dice Shield")
+    
+    gm_trait = st.selectbox("Select Trait Die:", ["d4", "d6", "d8", "d10", "d12"], index=1, key="gm_t")
+    gm_wild = st.selectbox("Select Wild Die:", ["d6", "None (Standard Extra)"], index=0, key="gm_w")
+    gm_w_pass = None if "None" in gm_wild else "d6"
+    gm_mod = st.number_input("Global Modifier:", value=0, step=1, key="gm_m")
+    
+    if st.button("🎲 Roll Action Check", use_container_width=True, key="gm_roll"):
+        res = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
+        st.session_state.dice_log.insert(0, res)
+        
+    # Attack Macros
+    st.caption("🧟 Fast Quick-Strike Attack Tracks")
+    c_m1, c_m2 = st.columns(2)
+    with c_m1:
+        if st.button("🧟 Zombie Scratch (d6 No Wild)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "🧟 **Mook Strike:** " + execute_swade_roll("d6", None, 0))
+    with c_m2:
+        if st.button("😈 Boss Strike (d8 vs d6)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "😈 **Wild Card Threat:** " + execute_swade_roll("d8", "d6", 0))
+            
+    if st.session_state.dice_log:
+        st.markdown("### 📜 Session Action Output Log")
+        if st.button("🗑️ Clear Log Console", use_container_width=True):
+            st.session_state.dice_log = []
+            st.rerun()
+        for log in st.session_state.dice_log:
+            st.info(log)
 
 # ==========================================
 # 📱 VIEW 2: THE MOBILE PLAYER WORKSPACE
 # ==========================================
-elif st.session_state.view_mode == "Player View":
-    st.title("📱 Player Synch Workspace")
-    
-    # Structural separation tab tracks
-    tab_init, tab_dice = st.tabs(["📡 Live Initiative Feed", "🎲 Action Dice Roller & Macros"])
+else:
+    st.title("📱 Player Synch Dashboard")
+    tab_init, tab_dice = st.tabs(["📡 Live Turn Order", "🎲 Dice Tray & Quick Macros"])
     
     with tab_init:
-        col_p1, col_p2 = st.columns([1, 2])
-        with col_p1:
-            player_join_name = st.text_input("Enter Character Name:", value="", max_chars=20, key="join_name_fld").strip()
-        with col_p2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔗 Synch Character Connection", type="primary", use_container_width=True):
-                if player_join_name and player_join_name not in active_pcs:
-                    active_pcs.append(player_join_name)
-                    push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
-                    st.success(f"'{player_join_name}' successfully broadcast to GM Tactical Grid!")
-                    st.rerun()
-                    
+        st.markdown("### Connect Your Character to the Grid")
+        p_name = st.text_input("Character Name:", value="", max_chars=20, key="p_join").strip()
+        if st.button("🔗 Synch Connection to Table", type="primary", use_container_width=True):
+            if p_name and p_name not in active_pcs:
+                active_pcs.append(p_name)
+                push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
+                st.success(f"Connected '{p_name}' successfully!")
+                st.rerun()
+                
         st.markdown("---")
         
         if room_data and room_data.get("sorted_hands"):
             manifest_wrapper = room_data.get("sorted_hands", {})
             hands_map = manifest_wrapper.get("hands", {})
             current_round = room_data.get("round", 1)
-            is_j_active = room_data.get("joker_drawn", False)
             
-            st.subheader(f"🎴 Live Battle Manifest: Round {current_round}")
-            if is_j_active:
-                st.error("🚨 A JOKER HAS BEEN UNLEASHED! INITIATIVE ADVANTAGE ENGAGED. 🚨")
-                
+            st.subheader(f"🎴 Turn Sequence Manifest: Round {current_round}")
+            
             st.markdown(
                 """
                 <style>
                 .mobile-card-container { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding: 10px 4px; -webkit-overflow-scrolling: touch; }
-                .mobile-initiative-card { flex: 0 0 140px; text-align: center; padding: 14px; border-radius: 6px; border: 1px solid #4a4a4a; min-height: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+                .mobile-initiative-card { flex: 0 0 130px; text-align: center; padding: 12px; border-radius: 6px; border: 1px solid #2d3545; min-height: 110px; background-color:#1c212b; }
                 .mobile-card-container::-webkit-scrollbar { display: none; }
                 </style>
                 """, unsafe_allow_html=True
@@ -335,68 +316,49 @@ elif st.session_state.view_mode == "Player View":
             for idx, (name, card) in enumerate(hands_map.items()):
                 badge_lbl = "PLAYER" if name in active_pcs else "NPC"
                 badge_color = "#3b66a6" if badge_lbl == "PLAYER" else "#ff4b4b"
-                is_joker_card = "Joker" in card
-                bg_card_hex = "#ff4b4b" if is_joker_card else "#1e1e24"
-                suit_text_hex = "white" if is_joker_card else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+                is_joker = "Joker" in card
+                bg_hex = "#ff4b4b" if is_joker else "#1c212b"
+                s_hex = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
                 
                 html_carousel += f"""
-                <div class="mobile-initiative-card" style="background-color: {bg_card_hex};">
-                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:4px; margin-bottom:8px;">
-                        <strong style="font-size:11px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;">{name}</strong>
+                <div class="mobile-initiative-card" style="background-color: {bg_hex};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:4px; margin-bottom:6px;">
+                        <strong style="font-size:11px; color:white; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70px;">{name}</strong>
                         <span style="background-color:{badge_color}; color:white; font-size:8px; padding:1px 3px; border-radius:2px; font-weight:bold;">#{idx+1}</span>
                     </div>
-                    <div style="font-size:26px; font-weight:bold; color:{suit_text_hex}; margin-top:8px;">{card}</div>
+                    <div style="font-size:24px; font-weight:bold; color:{s_hex}; margin-top:4px;">{card}</div>
                 </div>
                 """
             html_carousel += '</div>'
             st.markdown(html_carousel, unsafe_allow_html=True)
-            st.info("📱 Swipe horizontally across the cards to view the complete turn order sequence.")
+            st.info("📱 Swipe across the row cards to scroll the full turn order sequence.")
         else:
-            st.warning("Waiting for the Game Master to deal cards for this session...")
+            st.warning("Waiting for the GM to deal cards for this session...")
 
     with tab_dice:
-        st.subheader("🎲 Savage Worlds Trait & Damage Roller")
+        st.subheader("🎲 Action Dice Tray")
+        p_trait = st.selectbox("Trait Die:", ["d4", "d6", "d8", "d10", "d12"], index=1, key="p_t")
+        p_wild = st.selectbox("Wild Die:", ["d6", "None"], index=0, key="p_w")
+        p_w_pass = None if p_wild == "None" else "d6"
+        p_mod = st.number_input("Modifier:", value=0, step=1, key="p_m")
         
-        c_roll1, c_roll2, c_roll3 = st.columns([1, 1, 1])
-        with c_roll1:
-            trait_die = st.selectbox("Trait Die (Skill/Attribute):", ["d4", "d6", "d8", "d10", "d12"], index=1)
-        with c_roll2:
-            wild_die = st.selectbox("Wild Die Selection:", ["d6", "None"], index=0)
-            w_pass = None if wild_die == "None" else wild_die
-        with c_roll3:
-            mod_val = st.number_input("Static Modifier (+/-):", value=0, step=1)
-            
-        if st.button("🔥 Execute Trait Check", type="primary", use_container_width=True):
-            roll_result = execute_swade_roll(trait_die, w_pass, mod_val)
-            st.session_state.dice_log.insert(0, roll_result)
+        if st.button("🔥 Roll Trait Check", type="primary", use_container_width=True):
+            st.session_state.dice_log.insert(0, execute_swade_roll(p_trait, p_w_pass, p_mod))
+            st.rerun()
             
         st.markdown("---")
-        st.subheader("⚔️ Direct Weapon Macro Launchpad")
-        
-        macro_cols = st.columns(3)
-        with macro_cols[0]:
-            if st.button("🗡️ Fighting (d8 vs d6)", use_container_width=True):
-                st.session_state.dice_log.insert(0, "⚔️ **Fighting Attack:**\n" + execute_swade_roll("d8", "d6", 0))
-        with macro_cols[1]:
-            if st.button("🏹 Shooting (d6 vs d6 + 1)", use_container_width=True):
-                st.session_state.dice_log.insert(0, "🎯 **Shooting Attack:**\n" + execute_swade_roll("d6", "d6", 1))
-        with macro_cols[2]:
-            if st.button("💥 Greatsword Damage (2d10)", use_container_width=True):
-                st.session_state.dice_log.insert(0, "💥 **Greatsword Damage Output:**\n" + execute_swade_roll("d10", None, 0) + "\n" + execute_swade_roll("d10", None, 0))
-                
+        st.subheader("⚔️ Attack Macros")
+        if st.button("🗡️ Fighting Slash (d8 vs d6)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "⚔️ **Fighting:** " + execute_swade_roll("d8", "d6", 0))
+            st.rerun()
+        if st.button("🏹 Shooting Launch (d6 vs d6 + 1)", use_container_width=True):
+            st.session_state.dice_log.insert(0, "🎯 **Shooting:** " + execute_swade_roll("d6", "d6", 1))
+            st.rerun()
+            
         if st.session_state.dice_log:
-            st.markdown("### 📜 Table Roll History Console")
-            if st.button("🗑️ Clear Log Console", use_container_width=True):
+            st.markdown("### 📜 Personal Action History Log")
+            if st.button("🗑️ Reset Log Windows", use_container_width=True):
                 st.session_state.dice_log = []
                 st.rerun()
             for log in st.session_state.dice_log:
                 st.info(log)
-
-# ==========================================
-# 🌌 VIEW 3: THE PRIVATE LANDING DESK
-# ==========================================
-else:
-    st.title("🌌 Steele & Sorcery Campaign Terminal")
-    st.write("Welcome to the operational gateway for the RPG Legends tabletop crew.")
-    st.markdown("---")
-    st.info("👈 Open the sidebar operation terminal to launch the GM Tactical Command Center or connect a Player Sync device browser panel!")
