@@ -12,14 +12,25 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-if "room_code" not in st.session_state:
+# 🌟 CRITICAL FIX: Session-Lock tracking to force a clean slate on browser open
+if "session_initialized" not in st.session_state:
+    st.session_state.session_initialized = True
     st.session_state.room_code = "RPGL"
-if "view_mode" not in st.session_state:
     st.session_state.view_mode = "GM Dashboard"
-if "npc_input_name" not in st.session_state:
     st.session_state.npc_input_name = ""
-if "dice_log" not in st.session_state:
     st.session_state.dice_log = []
+    
+    # Force wipe the database row for this room immediately on fresh browser launch
+    try:
+        supabase.table("combat_sessions").update({
+            "player_characters": json.dumps([]),
+            "gm_npcs": json.dumps([]),
+            "sorted_hands": {"hands": {}},
+            "round": 1,
+            "joker_drawn": False
+        }).eq("room_code", "RPGL").execute()
+    except:
+        pass
 
 def generate_fresh_deck():
     suits = ['♠', '♥', '♦', '♣']
@@ -137,7 +148,7 @@ if st.sidebar.button("📱 Launch Player Table Sync", use_container_width=True):
     st.session_state.view_mode = "Player View"
     st.rerun()
 
-# 📥 SYSTEM UPDATE: Pulling active arrays directly from the new DB text columns
+# Read live parameters straight from DB text fields
 room_data = pull_room_state_from_db(st.session_state.room_code)
 active_pcs = json.loads(room_data.get("player_characters")) if room_data and room_data.get("player_characters") else []
 active_npcs = json.loads(room_data.get("gm_npcs")) if room_data and room_data.get("gm_npcs") else []
@@ -163,7 +174,7 @@ if st.session_state.view_mode == "GM Dashboard":
     st.caption(f"Connected to Room Code: **{st.session_state.room_code}**")
     
     # --------------------------------------
-    # 📑 SECTION 1: MASTER INITIATIVE TRACKER
+    # 🎴 SECTION 1: MASTER INITIATIVE TRACKER
     # --------------------------------------
     st.markdown("## 🎴 Live Battle Manifest Order")
     
@@ -212,7 +223,6 @@ if st.session_state.view_mode == "GM Dashboard":
     if st.button("➕ Add Threat to Room", use_container_width=True):
         if new_npc and new_npc not in active_npcs:
             active_npcs.append(new_npc)
-            # 💾 SYSTEM UPDATE: Saved straight to DB text column instead of cache
             push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
             st.session_state.npc_input_name = ""
             st.rerun()
@@ -227,7 +237,6 @@ if st.session_state.view_mode == "GM Dashboard":
             with c_del:
                 if st.button("🗑️", key=f"del_pc_{pc}", use_container_width=True):
                     active_pcs.remove(pc)
-                    # 💾 SYSTEM UPDATE: Updated straight to DB text column instead of cache
                     push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                     st.rerun()
 
@@ -241,7 +250,6 @@ if st.session_state.view_mode == "GM Dashboard":
             with c_del:
                 if st.button("🗑️", key=f"del_npc_{npc}", use_container_width=True):
                     active_npcs.remove(npc)
-                    # 💾 SYSTEM UPDATE: Updated straight to DB text column instead of cache
                     push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                     st.rerun()
 
@@ -261,7 +269,6 @@ if st.session_state.view_mode == "GM Dashboard":
         res = execute_swade_roll(gm_trait, gm_w_pass, gm_mod)
         st.session_state.dice_log.insert(0, res)
         
-    # Attack Macros
     st.caption("微 Fast Quick-Strike Attack Tracks")
     c_m1, c_m2 = st.columns(2)
     with c_m1:
@@ -292,7 +299,6 @@ else:
         if st.button("🔗 Synch Connection to Table", type="primary", use_container_width=True):
             if p_name and p_name not in active_pcs:
                 active_pcs.append(p_name)
-                # 💾 SYSTEM UPDATE: Saved straight to DB text column instead of cache
                 push_rosters_to_db(st.session_state.room_code, active_pcs, active_npcs)
                 st.success(f"Connected '{p_name}' successfully!")
                 st.rerun()
