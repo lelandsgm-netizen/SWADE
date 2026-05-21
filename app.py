@@ -25,70 +25,68 @@ if SUPABASE_URL and SUPABASE_KEY:
         pass
 
 # --- Persistent Session State Configuration ---
-if "deck" not in st.session_state:
+if "session_initialized" not in st.session_state:
+    st.session_state.session_initialized = True
     st.session_state.deck = []
-if "discard" not in st.session_state:
     st.session_state.discard = []
-if "joker_drawn" not in st.session_state:
     st.session_state.joker_drawn = False
-if "roll_history" not in st.session_state:
     st.session_state.roll_history = []
-if "manual_combatants" not in st.session_state:
-    st.session_state.manual_combatants = [] 
-
-# Combat Round Tracking States
-if "round_counter" not in st.session_state:
     st.session_state.round_counter = 0
-if "round_history" not in st.session_state:
     st.session_state.round_history = [] 
-if "current_round_hands" not in st.session_state:
     st.session_state.current_round_hands = {}
-
-# Dynamic Room Management State
-if "connected_room_code" not in st.session_state:
-    st.session_state.connected_room_code = "SWAD" # Default room code anchor
+    st.session_state.connected_room_code = "SWAD"
 
 # ==========================================
 #     🌟 DATABASE CLOUD SYNC OPERATIONS
 # ==========================================
 def push_initiative_to_db(room_code, sorted_hands_dict, round_num):
     """Pushes a live round card manifest to the Supabase cloud table."""
-    if not supabase_client:
-        return
+    if not supabase_client: return
     
-    # Package data neatly into JSON format
-    payload = {
-        "round": round_num,
-        "joker_drawn": st.session_state.joker_drawn,
-        "hands": sorted_hands_dict
-    }
-    
+    payload = {"round": round_num, "joker_drawn": st.session_state.joker_drawn, "hands": sorted_hands_dict}
     try:
-        # Check if row already exists for this room
         response = supabase_client.table("combat_sessions").select("*").eq("room_code", room_code.upper()).execute()
         if response.data:
-            # Update existing row
             supabase_client.table("combat_sessions").update({"sorted_hands": payload}).eq("room_code", room_code.upper()).execute()
         else:
-            # Insert fresh row
             supabase_client.table("combat_sessions").insert({"room_code": room_code.upper(), "sorted_hands": payload}).execute()
     except:
         pass
 
 def pull_initiative_from_db(room_code):
     """Retrieves the live synchronized round manifest from the cloud."""
-    if not supabase_client:
-        return None
+    if not supabase_client: return None
     try:
-        response = supabase_client.table("combat_sessions").select("sorted_hands").eq("room_code", room_code.upper()).execute()
-        if response.data and response.data[0]["sorted_hands"]:
-            return response.data[0]["sorted_hands"]
+        response = supabase_client.table("combat_sessions").select("sorted_hands", "round", "joker_drawn").eq("room_code", room_code.upper()).execute()
+        if response.data:
+            return response.data[0]
     except:
         pass
     return None
 
+def pull_room_state(room_code):
+    """Retrieves the complete state including the new text array columns."""
+    if not supabase_client: return None
+    try:
+        response = supabase_client.table("combat_sessions").select("*").eq("room_code", room_code.upper()).execute()
+        if response.data: return response.data[0]
+    except:
+        pass
+    return None
+
+def push_rosters_to_db(room_code, pcs, npcs):
+    """Writes the active character arrays back to the Supabase text columns."""
+    if not supabase_client: return
+    try:
+        supabase_client.table("combat_sessions").update({
+            "player_characters": json.dumps(pcs),
+            "gm_npcs": json.dumps(npcs)
+        }).eq("room_code", room_code.upper()).execute()
+    except:
+        pass
+
 # ==========================================
-#      CARD DEALER ENGINE ENGINE CORES
+#      CARD DEALER ENGINE CORES
 # ==========================================
 def build_deck():
     suits = ['♠', '♥', '♦', '♣']
@@ -108,8 +106,7 @@ if not st.session_state.deck and not st.session_state.discard:
     shuffle_deck()
 
 def get_card_weight(card_str):
-    if "Joker" in card_str:
-        return 9999
+    if "Joker" in card_str: return 9999
     val_part = card_str[:-1]
     suit_part = card_str[-1]
     value_map = {'2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14}
@@ -133,26 +130,19 @@ def deal_to_roster(roster_list):
     st.session_state.round_history.insert(0, (st.session_state.round_counter, list(sorted_hands.items())))
     st.session_state.discard.extend(sorted_hands.values())
     
-    # CLOUD SYNC EXECUTION: Push the round update live to Supabase server
+    # CLOUD SYNC EXECUTION
     push_initiative_to_db(st.session_state.connected_room_code, sorted_hands, st.session_state.round_counter)
-    
     send_initiative_to_discord(sorted_hands, st.session_state.round_counter)
 
 def send_initiative_to_discord(sorted_hands, round_num):
-    if not DISCORD_WEBHOOK_URL:
-        return
+    if not DISCORD_WEBHOOK_URL: return
     fields = []
     for idx, (actor_name, card_value) in enumerate(sorted_hands.items(), 1):
         status = "ACTING FIRST" if idx == 1 else f"Turn Order #{idx}"
-        if "Joker" in card_value:
-            status = "🃏 JOKER (Actions +2 / Toughness +2)"
+        if "Joker" in card_value: status = "🃏 JOKER (Actions +2 / Toughness +2)"
         fields.append({"name": f"{idx}. {actor_name.upper()}", "value": f"Card: **{card_value}**\n*{status}*", "inline": False})
         
-    embed = {
-        "title": f"⚔️ Initiative Dispatched: Round {round_num}",
-        "color": 3447003,
-        "fields": fields
-    }
+    embed = {"title": f"⚔️ Initiative Dispatched: Round {round_num}", "color": 3447003, "fields": fields}
     payload = {"username": "SWADE Turn Bot", "embeds": [embed]}
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
@@ -167,8 +157,7 @@ def roll_single_die(sides):
     while True:
         roll = random.randint(1, sides)
         rolls.append(roll)
-        if roll == sides:
-            continue
+        if roll == sides: continue
         break
     return rolls
 
@@ -179,8 +168,7 @@ def parse_dice_string(dice_string):
     modifier = 0
     if remainder:
         mod_matches = re.findall(r'([+-]?\d+)', remainder)
-        for mod in mod_matches:
-            modifier += int(mod)
+        for mod in mod_matches: modifier += int(mod)
     dice_to_roll = []
     for count_str, sides_str in dice_matches:
         count = 1
@@ -271,8 +259,7 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
     return {"title": title_text, "author": {"name": player_name.upper()}, "color": 15158332, "fields": fields_log}, final_total
 
 def send_discord_roll(embed, is_blind=False):
-    if is_blind or not DISCORD_WEBHOOK_URL:
-        return True
+    if is_blind or not DISCORD_WEBHOOK_URL: return True
     payload = {"username": "SWADE Dice Bot", "embeds": [embed]}
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
@@ -327,7 +314,9 @@ with st.sidebar.expander("👤 Character Profile Caching"):
     if st.button("💾 Lock Profile to Browser Memory", use_container_width=True):
         local_storage.setItem("swade_player_name", p_name, key="comb_save_name")
         for i, (t, f, ap) in enumerate([(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)], 1):
-            local_storage.setItem(f"swade_m{i}_t", t, key=f"cs_m{i}_t"); local_storage.setItem(f"swade_m{i}_f", f, key=f"cs_m{i}_f"); local_storage.setItem(f"swade_m{i}_ap", str(ap), key=f"cs_m{i}_ap")
+            local_storage.setItem(f"swade_m{i}_t", t, key=f"cs_m{i}_t")
+            local_storage.setItem(f"swade_m{i}_f", f, key=f"cs_m{i}_f")
+            local_storage.setItem(f"swade_m{i}_ap", str(ap), key=f"cs_m{i}_ap")
         st.success("Macros locked!")
 
 # ==========================================
@@ -385,26 +374,56 @@ if app_mode == "🎲 Tactical Dice Console":
 elif app_mode == "🃏 Action Card Dealer (GM)":
     st.header("🃏 Action Card Dealer (GM Control Deck)")
     
-    # Secure Session Room Allocation setup
     st.session_state.connected_room_code = st.text_input("Campaign Active Room Code:", value="SWAD", max_chars=6).upper()
     
     if st.session_state.joker_drawn: st.error("🚨 JOKER DRAWN! RESHUFFLE NEXT ROUND.")
     st.metric("Cards Remaining in Deck", len(st.session_state.deck))
     
     st.subheader("👥 Tactical Roster")
-    full_roster = [p_name] + st.session_state.manual_combatants
+    
+    # 📥 Fetch persistent rosters from Database instead of session cache
+    db_state = pull_room_state(st.session_state.connected_room_code)
+    active_pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
+    active_npcs = json.loads(db_state.get("gm_npcs", "[]")) if db_state and db_state.get("gm_npcs") else []
+    
+    # Keep GM in the PC loop automatically if they provided a profile name
+    if p_name and p_name not in active_pcs:
+        active_pcs.insert(0, p_name)
+        push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
+        
+    full_roster = active_pcs + active_npcs
+    
     clist, cadd = st.columns([2, 1])
     with clist:
-        for idx, actor in enumerate(full_roster):
+        # Render Player Characters
+        for pc in active_pcs:
             with st.container(border=True):
                 r1, r2 = st.columns([5, 1])
-                with r1: st.markdown(f"**{actor}** <small>({'Player' if idx==0 else 'NPC'})</small>", unsafe_allow_html=True)
+                with r1: st.markdown(f"**{pc}** <small>(Player)</small>", unsafe_allow_html=True)
                 with r2:
-                    if idx > 0 and st.button("🗑️", key=f"d_{idx}"): st.session_state.manual_combatants.pop(idx-1); st.rerun()
+                    if pc != p_name and st.button("🗑️", key=f"d_pc_{pc}"):
+                        active_pcs.remove(pc)
+                        push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
+                        st.rerun()
+        # Render NPCs
+        for npc in active_npcs:
+            with st.container(border=True):
+                r1, r2 = st.columns([5, 1])
+                with r1: st.markdown(f"**{npc}** <small>(NPC)</small>", unsafe_allow_html=True)
+                with r2:
+                    if st.button("🗑️", key=f"d_npc_{npc}"):
+                        active_npcs.remove(npc)
+                        push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
+                        st.rerun()
+
     with cadd:
         n_act = st.text_input("Name:", placeholder="NPC Name...", key="n_act")
         if st.button("➕ Add NPC", use_container_width=True):
-            if n_act.strip() and n_act not in full_roster: st.session_state.manual_combatants.append(n_act.strip()); st.rerun()
+            if n_act.strip() and n_act.strip() not in full_roster:
+                active_npcs.append(n_act.strip())
+                push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
+                st.rerun()
+                
         st.markdown("---")
         if st.button("🔄 Full Reshuffle", use_container_width=True): shuffle_deck(); st.success("Deck Shuffled!")
 
@@ -415,12 +434,21 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
     st.markdown("---")
     st.subheader("📜 Round Manifest")
     
+    # 🌟 CRITICAL FIX: The Clean Slate Wipe Protocol
     if st.button("🗑️ Clear Manifest & Reset Rounds", use_container_width=False):
         st.session_state.round_counter = 0
         st.session_state.round_history = []
         st.session_state.current_round_hands = {}
         st.session_state.joker_drawn = False
-        push_initiative_to_db(st.session_state.connected_room_code, {}, 0) # Wipe database state cleanly
+        
+        # Completely wipe the Supabase row to guarantee a pristine start on your next load
+        if supabase_client:
+            payload = {"round": 0, "joker_drawn": False, "hands": {}}
+            supabase_client.table("combat_sessions").update({
+                "sorted_hands": payload,
+                "player_characters": json.dumps([]),
+                "gm_npcs": json.dumps([])
+            }).eq("room_code", st.session_state.connected_room_code).execute()
         st.rerun()
 
     if st.session_state.round_history:
@@ -451,11 +479,22 @@ else:
         target_room = st.text_input("Enter 4-Letter Room Code:", value="SWAD", max_chars=6).upper()
     with c_r2:
         st.markdown("<br>", unsafe_allow_html=True)
-        refresh_trigger = st.button("🔄 Pull Current Table Initiative Status", type="primary", use_container_width=True)
+        c_btn1, c_btn2 = st.columns(2)
+        with c_btn1:
+            refresh_trigger = st.button("🔄 Pull Current Table Initiative Status", type="primary", use_container_width=True)
+        with c_btn2:
+            # Added a tiny hook so players can easily push their cached profile name to the database
+            if st.button("🙋 Join Active Roster", use_container_width=True):
+                db_state = pull_room_state(target_room)
+                pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
+                npcs = json.loads(db_state.get("gm_npcs", "[]")) if db_state and db_state.get("gm_npcs") else []
+                if p_name not in pcs:
+                    pcs.append(p_name)
+                    push_rosters_to_db(target_room, pcs, npcs)
+                    st.success(f"Deployed {p_name} to the GM's tactical grid!")
         
     st.markdown("---")
     
-    # Pull dynamic state parameters right from the cloud database row
     cloud_data = pull_initiative_from_db(target_room)
     
     if cloud_data and cloud_data.get("hands"):
@@ -469,7 +508,6 @@ else:
             
         st.caption("Sorted Sequence of Battle Order:")
         
-        # Draw synced cards into player panels
         p_cols = st.columns(len(hands_dict))
         for idx, (name, card) in enumerate(hands_dict.items()):
             with p_cols[idx]:
