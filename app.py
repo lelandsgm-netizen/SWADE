@@ -35,6 +35,10 @@ if "session_initialized" not in st.session_state:
     st.session_state.round_history = [] 
     st.session_state.current_round_hands = {}
     st.session_state.connected_room_code = "SWAD"
+    # Added state trackers for the manual override loading system
+    st.session_state.manual_mode = "📊 Trait Test"
+    st.session_state.d_str_input = "1d10+1d6"
+    st.session_state.d_ap_input = 0
 
 # ==========================================
 #     🌟 DATABASE CLOUD SYNC OPERATIONS
@@ -337,14 +341,25 @@ if app_mode == "🎲 Tactical Dice Console":
     for t, f, ap in macros:
         if t and f:
             with grid[col_idx % 2]:
-                if st.button(f"⚔️ {t} ({f})", use_container_width=True, key=f"run_{t}_{col_idx}"):
-                    emb, tot = execute_formula_damage_roll(p_name, f, ap, macro_label=t)
-                    if emb: send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
+                # Split the macro block into a main trigger and a smaller "Load" button
+                c_roll, c_load = st.columns([5, 1])
+                with c_roll:
+                    if st.button(f"⚔️ {t} ({f})", use_container_width=True, key=f"run_{t}_{col_idx}"):
+                        emb, tot = execute_formula_damage_roll(p_name, f, ap, macro_label=t)
+                        if emb: send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
+                with c_load:
+                    if st.button("📥", key=f"load_{col_idx}", help="Load formula into Manual Override to add modifiers"):
+                        st.session_state.d_str_input = f
+                        st.session_state.d_ap_input = ap
+                        st.session_state.manual_mode = "💥 Damage"
+                        st.rerun()
             col_idx += 1
 
     st.markdown("---")
     st.subheader("📋 Manual Override")
-    mode = st.radio("Type:", ["📊 Trait Test", "💥 Damage"])
+    # Link the radio widget directly to our session state tracker
+    mode = st.radio("Type:", ["📊 Trait Test", "💥 Damage"], key="manual_mode")
+    
     if mode == "📊 Trait Test":
         c1, c2, c3 = st.columns(3)
         with c1: d_die = st.selectbox("Die:", [4, 6, 8, 10, 12], index=2, format_func=lambda x: f"d{x}")
@@ -356,8 +371,9 @@ if app_mode == "🎲 Tactical Dice Console":
             emb = execute_dropdown_trait_roll(p_name, d_die, s_mod, (act-1)*-2, tn, is_frenzy=f_edge)
             send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
     else:
-        d_str = st.text_input("Formula:", value="1d10+1d6")
-        d_ap = st.number_input("AP:", value=0, min_value=0, step=1)
+        # These fields now pull directly from the session state if a macro loaded them
+        d_str = st.text_input("Formula:", key="d_str_input")
+        d_ap = st.number_input("AP:", min_value=0, step=1, key="d_ap_input")
         if st.button("💥 Fire Damage Roll", type="primary", use_container_width=True):
             emb, tot = execute_formula_damage_roll(p_name, d_str, d_ap)
             if emb: send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
@@ -501,7 +517,6 @@ else:
         is_j_drawn = cloud_data.get("joker_drawn", False)
         raw_hands = cloud_data.get("hands", {})
         
-        # 🛠️ THE FIX: Supabase JSONB scrambles dictionary order. We must re-sort it locally!
         hands_dict = dict(sorted(raw_hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
         
         st.subheader(f"🎴 Live Round Manifest: Round {r_num}")
