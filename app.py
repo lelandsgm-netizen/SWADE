@@ -57,9 +57,10 @@ def pull_initiative_from_db(room_code):
     """Retrieves the live synchronized round manifest from the cloud."""
     if not supabase_client: return None
     try:
-        response = supabase_client.table("combat_sessions").select("sorted_hands", "round", "joker_drawn").eq("room_code", room_code.upper()).execute()
-        if response.data:
-            return response.data[0]
+        response = supabase_client.table("combat_sessions").select("sorted_hands").eq("room_code", room_code.upper()).execute()
+        if response.data and response.data[0].get("sorted_hands"):
+            # CRITICAL FIX: Returns just the payload payload so Player View can read 'hands'
+            return response.data[0]["sorted_hands"]
     except:
         pass
     return None
@@ -379,14 +380,21 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
     if st.session_state.joker_drawn: st.error("🚨 JOKER DRAWN! RESHUFFLE NEXT ROUND.")
     st.metric("Cards Remaining in Deck", len(st.session_state.deck))
     
-    st.subheader("👥 Tactical Roster")
+    # --- Tactical Roster Layout with DB Hook ---
+    c_hdr1, c_hdr2 = st.columns([3, 1])
+    with c_hdr1:
+        st.subheader("👥 Tactical Roster")
+    with c_hdr2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        # GM manual refresh trigger to pull players who joined from their devices
+        if st.button("🔄 Sync Player Joins", use_container_width=True):
+            st.rerun()
     
-    # 📥 Fetch persistent rosters from Database instead of session cache
+    # 📥 Fetch persistent rosters from Database
     db_state = pull_room_state(st.session_state.connected_room_code)
     active_pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
     active_npcs = json.loads(db_state.get("gm_npcs", "[]")) if db_state and db_state.get("gm_npcs") else []
     
-    # Keep GM in the PC loop automatically if they provided a profile name
     if p_name and p_name not in active_pcs:
         active_pcs.insert(0, p_name)
         push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
@@ -395,7 +403,6 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
     
     clist, cadd = st.columns([2, 1])
     with clist:
-        # Render Player Characters
         for pc in active_pcs:
             with st.container(border=True):
                 r1, r2 = st.columns([5, 1])
@@ -405,7 +412,6 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
                         active_pcs.remove(pc)
                         push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
                         st.rerun()
-        # Render NPCs
         for npc in active_npcs:
             with st.container(border=True):
                 r1, r2 = st.columns([5, 1])
@@ -434,14 +440,13 @@ elif app_mode == "🃏 Action Card Dealer (GM)":
     st.markdown("---")
     st.subheader("📜 Round Manifest")
     
-    # 🌟 CRITICAL FIX: The Clean Slate Wipe Protocol
     if st.button("🗑️ Clear Manifest & Reset Rounds", use_container_width=False):
         st.session_state.round_counter = 0
         st.session_state.round_history = []
         st.session_state.current_round_hands = {}
         st.session_state.joker_drawn = False
         
-        # Completely wipe the Supabase row to guarantee a pristine start on your next load
+        # Total Wipe Protocol for Supabase Row
         if supabase_client:
             payload = {"round": 0, "joker_drawn": False, "hands": {}}
             supabase_client.table("combat_sessions").update({
@@ -483,7 +488,6 @@ else:
         with c_btn1:
             refresh_trigger = st.button("🔄 Pull Current Table Initiative Status", type="primary", use_container_width=True)
         with c_btn2:
-            # Added a tiny hook so players can easily push their cached profile name to the database
             if st.button("🙋 Join Active Roster", use_container_width=True):
                 db_state = pull_room_state(target_room)
                 pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
@@ -491,7 +495,7 @@ else:
                 if p_name not in pcs:
                     pcs.append(p_name)
                     push_rosters_to_db(target_room, pcs, npcs)
-                    st.success(f"Deployed {p_name} to the GM's tactical grid!")
+                    st.success(f"Deployed {p_name} to the GM's tactical grid! (Tell your GM to sync)")
         
     st.markdown("---")
     
