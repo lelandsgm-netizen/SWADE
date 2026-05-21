@@ -504,4 +504,30 @@ else:
         # 🛠️ THE FIX: Supabase JSONB scrambles dictionary order. We must re-sort it locally!
         hands_dict = dict(sorted(raw_hands.items(), key=lambda item: get_card_weight(item[1]), reverse=True))
         
-        st.subheader(f"🎴 Live Round Manifest: Round
+        st.subheader(f"🎴 Live Round Manifest: Round {r_num}")
+        if is_j_drawn:
+            st.error("🚨 A JOKER HAS BEEN UNLEASHED THIS ROUND! ALL COMBATANTS REMAIN ON HIGH ALERT. 🚨")
+            
+        st.caption("Sorted Sequence of Battle Order:")
+        
+        p_cols = st.columns(len(hands_dict))
+        for idx, (name, card) in enumerate(hands_dict.items()):
+            with p_cols[idx]:
+                badge = f"<div style='background-color:#5865f2; color:white; font-size:10px; padding:2px 5px; border-radius:3px; font-weight:bold;'>ACTING #{idx+1}</div>"
+                is_joker = "Joker" in card
+                bg = "#ff4b4b" if is_joker else "#1e1e24"
+                suit_c = "white" if is_joker else ("#ff4b4b" if ('♥' in card or '♦' in card) else "white")
+                
+                st.markdown(
+                    f"""
+                    <div style="background-color:{bg}; text-align:center; padding:16px; border-radius:5px; border:1px solid #4a4a4a; min-height:130px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:6px; margin-bottom:10px;">
+                            <strong style="font-size:12px; color:white; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px;">{name}</strong>
+                            {badge}
+                        </div>
+                        <div style="font-size:28px; font-weight:bold; color:{suit_c}; margin-top:5px;">{card}</div>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+    else:
+        st.warning(f"No active combat dashboard found matching Room Code '{target_room}'. Tell your GM to generate an active deal round first!")
