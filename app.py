@@ -35,9 +35,8 @@ if "session_initialized" not in st.session_state:
     st.session_state.round_history = [] 
     st.session_state.current_round_hands = {}
     st.session_state.connected_room_code = "SWAD"
-    st.session_state.app_role = "Player" # Default role on load
+    st.session_state.app_role = "Player"
     
-    # Manual override loading system states
     st.session_state.gm_manual_mode = "📊 Trait Test"
     st.session_state.gm_str_input = "1d10+1d6"
     st.session_state.gm_ap_input = 0
@@ -167,10 +166,18 @@ def parse_dice_string(dice_string):
         mod_matches = re.findall(r'([+-]?\d+)', remainder)
         for mod in mod_matches: modifier += int(mod)
     dice_to_roll = []
+    
+    # 🌟 CRITICAL FIX: Properly identify multiple dice logic (e.g., 3d6)
     for count_str, sides_str in dice_matches:
-        count = 1 if (count_str and count_str != '+' and count_str != '-') else (-1 if count_str == '-' else int(count_str)) if count_str else 1
+        if count_str == '' or count_str == '+':
+            count = 1
+        elif count_str == '-':
+            count = -1
+        else:
+            count = int(count_str)
         sides = int(sides_str)
         dice_to_roll.append((count, sides))
+        
     return dice_to_roll, modifier
 
 def calculate_resolution(total, tn):
@@ -236,12 +243,14 @@ def execute_formula_damage_roll(player_name, dice_input, armor_piercing, macro_l
         return None, "Error parsing dice string."
     fields_log, damage_grand_total = [], 0
     for count, sides in dice_to_roll:
+        multiplier = -1 if count < 0 else 1
         for _ in range(abs(count)):
             rolls = roll_single_die(sides)
-            total = sum(rolls)
+            total = sum(rolls) * multiplier
             trail = " -> ".join([f"[{r}]" if r != sides else f"[{r}]💥" for r in rolls])
             damage_grand_total += total
-            fields_log.append({"name": f"💥 Damage Die (d{sides})", "value": f"{trail} = **{total}**", "inline": True})
+            sign_str = "-" if multiplier < 0 else ""
+            fields_log.append({"name": f"💥 Damage Die ({sign_str}d{sides})", "value": f"{trail} = **{total}**", "inline": True})
     final_total = damage_grand_total + global_modifier
     mod_sign = f"+{global_modifier}" if global_modifier >= 0 else f"{global_modifier}"
     ap_suffix = f" | 🪓 **AP {armor_piercing}**" if armor_piercing > 0 else ""
@@ -283,7 +292,7 @@ if col2.button("🗡️ Player", use_container_width=True):
 
 st.sidebar.markdown("---")
 
-# Profile setup remains global so everyone has access to macros
+# Pull Local Storage Defaults
 saved_name = local_storage.getItem("swade_player_name") or "Hero"
 macro_data = {}
 for i in range(1, 7):
@@ -292,25 +301,66 @@ for i in range(1, 7):
     try: macro_data[f"ap_{i}"] = int(local_storage.getItem(f"swade_m{i}_ap") or "0")
     except: macro_data[f"ap_{i}"] = 0
 
-with st.sidebar.expander("👤 Character Profile Configuration", expanded=True):
-    p_name = st.text_input("Identity Name:", value=saved_name)
-    st.markdown("**Configure Weapon Macros**")
-    t1, t2 = st.tabs(["1-3", "4-6"])
-    with t1:
-        m1_t, m1_f, m1_ap = st.text_input("M1 Title:", value=macro_data["t_1"]), st.text_input("M1 Formula:", value=macro_data["f_1"]), st.number_input("M1 AP:", value=macro_data["ap_1"], min_value=0)
-        m2_t, m2_f, m2_ap = st.text_input("M2 Title:", value=macro_data["t_2"]), st.text_input("M2 Formula:", value=macro_data["f_2"]), st.number_input("M2 AP:", value=macro_data["ap_2"], min_value=0)
-        m3_t, m3_f, m3_ap = st.text_input("M3 Title:", value=macro_data["t_3"]), st.text_input("M3 Formula:", value=macro_data["f_3"]), st.number_input("M3 AP:", value=macro_data["ap_3"], min_value=0)
-    with t2:
-        m4_t, m4_f, m4_ap = st.text_input("M4 Title:", value=macro_data["t_4"]), st.text_input("M4 Formula:", value=macro_data["f_4"]), st.number_input("M4 AP:", value=macro_data["ap_4"], min_value=0)
-        m5_t, m5_f, m5_ap = st.text_input("M5 Title:", value=macro_data["t_5"]), st.text_input("M5 Formula:", value=macro_data["f_5"]), st.number_input("M5 AP:", value=macro_data["ap_5"], min_value=0)
-        m6_t, m6_f, m6_ap = st.text_input("M6 Title:", value=macro_data["t_6"]), st.text_input("M6 Formula:", value=macro_data["f_6"]), st.number_input("M6 AP:", value=macro_data["ap_6"], min_value=0)
-    if st.button("💾 Lock Profile Memory", use_container_width=True):
-        local_storage.setItem("swade_player_name", p_name, key="comb_save_name")
-        for i, (t, f, ap) in enumerate([(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)], 1):
-            local_storage.setItem(f"swade_m{i}_t", t, key=f"cs_m{i}_t")
-            local_storage.setItem(f"swade_m{i}_f", f, key=f"cs_m{i}_f")
-            local_storage.setItem(f"swade_m{i}_ap", str(ap), key=f"cs_m{i}_ap")
-        st.success("Macros locked!")
+p_name = saved_name # Global default
+
+# --- ROLE-GATED SIDEBAR LOGIC ---
+if st.session_state.app_role == "GM":
+    # The new dedicated GM Sidebar Tools
+    st.sidebar.subheader("⚙️ GM Operations")
+    if st.sidebar.button("🔄 Sync Player Joins", use_container_width=True, key="sb_gm_sync"):
+        st.rerun()
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Add NPC to Roster**")
+    n_act = st.sidebar.text_input("NPC Name:", placeholder="Zombie...", key="sb_gm_n_act")
+    if st.sidebar.button("➕ Add NPC", use_container_width=True, key="sb_gm_add_npc"):
+        db_state = pull_room_state(st.session_state.connected_room_code)
+        pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
+        npcs = json.loads(db_state.get("gm_npcs", "[]")) if db_state and db_state.get("gm_npcs") else []
+        if n_act.strip() and n_act.strip() not in (pcs + npcs):
+            npcs.append(n_act.strip())
+            push_rosters_to_db(st.session_state.connected_room_code, pcs, npcs)
+            st.rerun()
+            
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Full Reshuffle", use_container_width=True, key="sb_gm_reshuffle"):
+        shuffle_deck()
+        st.sidebar.success("Deck Shuffled!")
+        
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🗑️ Clear Manifest & Reset", use_container_width=True, key="sb_gm_clear"):
+        st.session_state.round_counter = 0
+        st.session_state.round_history = []
+        st.session_state.current_round_hands = {}
+        st.session_state.joker_drawn = False
+        if supabase_client:
+            payload = {"round": 0, "joker_drawn": False, "hands": {}}
+            supabase_client.table("combat_sessions").update({
+                "sorted_hands": payload, "player_characters": json.dumps([]), "gm_npcs": json.dumps([])
+            }).eq("room_code", st.session_state.connected_room_code).execute()
+        st.rerun()
+
+else:
+    # The Player Profile Config remains untouched and gated solely for players
+    with st.sidebar.expander("👤 Character Profile Configuration", expanded=True):
+        p_name = st.text_input("Identity Name:", value=saved_name)
+        st.markdown("**Configure Weapon Macros**")
+        t1, t2 = st.tabs(["1-3", "4-6"])
+        with t1:
+            m1_t, m1_f, m1_ap = st.text_input("M1 Title:", value=macro_data["t_1"]), st.text_input("M1 Formula:", value=macro_data["f_1"]), st.number_input("M1 AP:", value=macro_data["ap_1"], min_value=0)
+            m2_t, m2_f, m2_ap = st.text_input("M2 Title:", value=macro_data["t_2"]), st.text_input("M2 Formula:", value=macro_data["f_2"]), st.number_input("M2 AP:", value=macro_data["ap_2"], min_value=0)
+            m3_t, m3_f, m3_ap = st.text_input("M3 Title:", value=macro_data["t_3"]), st.text_input("M3 Formula:", value=macro_data["f_3"]), st.number_input("M3 AP:", value=macro_data["ap_3"], min_value=0)
+        with t2:
+            m4_t, m4_f, m4_ap = st.text_input("M4 Title:", value=macro_data["t_4"]), st.text_input("M4 Formula:", value=macro_data["f_4"]), st.number_input("M4 AP:", value=macro_data["ap_4"], min_value=0)
+            m5_t, m5_f, m5_ap = st.text_input("M5 Title:", value=macro_data["t_5"]), st.text_input("M5 Formula:", value=macro_data["f_5"]), st.number_input("M5 AP:", value=macro_data["ap_5"], min_value=0)
+            m6_t, m6_f, m6_ap = st.text_input("M6 Title:", value=macro_data["t_6"]), st.text_input("M6 Formula:", value=macro_data["f_6"]), st.number_input("M6 AP:", value=macro_data["ap_6"], min_value=0)
+        if st.button("💾 Lock Profile Memory", use_container_width=True):
+            local_storage.setItem("swade_player_name", p_name, key="comb_save_name")
+            for i, (t, f, ap) in enumerate([(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)], 1):
+                local_storage.setItem(f"swade_m{i}_t", t, key=f"cs_m{i}_t")
+                local_storage.setItem(f"swade_m{i}_f", f, key=f"cs_m{i}_f")
+                local_storage.setItem(f"swade_m{i}_ap", str(ap), key=f"cs_m{i}_ap")
+            st.success("Macros locked!")
 
 
 # ==========================================
@@ -318,11 +368,8 @@ with st.sidebar.expander("👤 Character Profile Configuration", expanded=True):
 # ==========================================
 if st.session_state.app_role == "GM":
     st.header("👑 Game Master Command Console")
-    
-    # 🌟 NEW RULE: All GM rolls are automatically blind (Hidden from Discord)
     blind_roll = True 
     
-    # Split the main UI into clean tabs for the GM
     tab_dealer, tab_dice = st.tabs(["🃏 Action Card Dealer", "🎲 Tactical Dice Shield"])
 
     with tab_dealer:
@@ -330,48 +377,28 @@ if st.session_state.app_role == "GM":
         
         if st.session_state.joker_drawn: st.error("🚨 JOKER DRAWN! RESHUFFLE NEXT ROUND.")
         st.metric("Cards Remaining in Deck", len(st.session_state.deck))
-        
-        c_hdr1, c_hdr2 = st.columns([3, 1])
-        with c_hdr1: st.subheader("👥 Tactical Roster")
-        with c_hdr2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄 Sync Player Joins", use_container_width=True, key="gm_sync_btn"): st.rerun()
+        st.subheader("👥 Tactical Roster")
         
         db_state = pull_room_state(st.session_state.connected_room_code)
         active_pcs = json.loads(db_state.get("player_characters", "[]")) if db_state and db_state.get("player_characters") else []
         active_npcs = json.loads(db_state.get("gm_npcs", "[]")) if db_state and db_state.get("gm_npcs") else []
-        
-        if p_name and p_name not in active_pcs:
-            active_pcs.insert(0, p_name)
-            push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs)
-            
         full_roster = active_pcs + active_npcs
         
-        clist, cadd = st.columns([2, 1])
-        with clist:
-            for pc in active_pcs:
-                with st.container(border=True):
-                    r1, r2 = st.columns([5, 1])
-                    with r1: st.markdown(f"**{pc}** <small>(Player)</small>", unsafe_allow_html=True)
-                    with r2:
-                        if pc != p_name and st.button("🗑️", key=f"gm_d_pc_{pc}"):
-                            active_pcs.remove(pc); push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs); st.rerun()
-            for npc in active_npcs:
-                with st.container(border=True):
-                    r1, r2 = st.columns([5, 1])
-                    with r1: st.markdown(f"**{npc}** <small>(NPC)</small>", unsafe_allow_html=True)
-                    with r2:
-                        if st.button("🗑️", key=f"gm_d_npc_{npc}"):
-                            active_npcs.remove(npc); push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs); st.rerun()
-
-        with cadd:
-            n_act = st.text_input("Name:", placeholder="NPC Name...", key="gm_n_act")
-            if st.button("➕ Add NPC", use_container_width=True, key="gm_add_npc_btn"):
-                if n_act.strip() and n_act.strip() not in full_roster:
-                    active_npcs.append(n_act.strip()); push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs); st.rerun()
-                    
-            st.markdown("---")
-            if st.button("🔄 Full Reshuffle", use_container_width=True, key="gm_reshuffle"): shuffle_deck(); st.success("Deck Shuffled!")
+        # Cleaned up full-width roster view directly on the page
+        for pc in active_pcs:
+            with st.container(border=True):
+                r1, r2 = st.columns([5, 1])
+                with r1: st.markdown(f"**{pc}** <small>(Player)</small>", unsafe_allow_html=True)
+                with r2:
+                    if st.button("🗑️", key=f"gm_d_pc_{pc}"):
+                        active_pcs.remove(pc); push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs); st.rerun()
+        for npc in active_npcs:
+            with st.container(border=True):
+                r1, r2 = st.columns([5, 1])
+                with r1: st.markdown(f"**{npc}** <small>(NPC)</small>", unsafe_allow_html=True)
+                with r2:
+                    if st.button("🗑️", key=f"gm_d_npc_{npc}"):
+                        active_npcs.remove(npc); push_rosters_to_db(st.session_state.connected_room_code, active_pcs, active_npcs); st.rerun()
 
         st.markdown("---")
         if st.button("🃏 Deal Cards & Next Round", type="primary", use_container_width=True, key="gm_deal"):
@@ -379,18 +406,6 @@ if st.session_state.app_role == "GM":
 
         st.markdown("---")
         st.subheader("📜 Round Manifest")
-        
-        if st.button("🗑️ Clear Manifest & Reset Rounds", use_container_width=False, key="gm_clear_manifest"):
-            st.session_state.round_counter = 0
-            st.session_state.round_history = []
-            st.session_state.current_round_hands = {}
-            st.session_state.joker_drawn = False
-            if supabase_client:
-                payload = {"round": 0, "joker_drawn": False, "hands": {}}
-                supabase_client.table("combat_sessions").update({
-                    "sorted_hands": payload, "player_characters": json.dumps([]), "gm_npcs": json.dumps([])
-                }).eq("room_code", st.session_state.connected_room_code).execute()
-            st.rerun()
 
         if st.session_state.round_history:
             for r_num, hands_list in st.session_state.round_history:
@@ -407,27 +422,6 @@ if st.session_state.app_role == "GM":
             st.caption("Manifest empty. Deal cards to begin Round 1.")
 
     with tab_dice:
-        st.subheader("🎯 Attack Macros")
-        grid = st.columns(2)
-        macros = [(m1_t, m1_f, m1_ap), (m2_t, m2_f, m2_ap), (m3_t, m3_f, m3_ap), (m4_t, m4_f, m4_ap), (m5_t, m5_f, m5_ap), (m6_t, m6_f, m6_ap)]
-        col_idx = 0
-        for t, f, ap in macros:
-            if t and f:
-                with grid[col_idx % 2]:
-                    c_roll, c_load = st.columns([5, 1])
-                    with c_roll:
-                        if st.button(f"⚔️ {t} ({f})", use_container_width=True, key=f"gm_run_{t}_{col_idx}"):
-                            emb, tot = execute_formula_damage_roll(p_name, f, ap, macro_label=t)
-                            if emb: send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
-                    with c_load:
-                        if st.button("📥", key=f"gm_load_{col_idx}", help="Load formula"):
-                            st.session_state.gm_str_input = f
-                            st.session_state.gm_ap_input = ap
-                            st.session_state.gm_manual_mode = "💥 Damage"
-                            st.rerun()
-                col_idx += 1
-
-        st.markdown("---")
         st.subheader("📋 Manual Override")
         mode = st.radio("Type:", ["📊 Trait Test", "💥 Damage"], key="gm_manual_mode")
         
@@ -439,13 +433,13 @@ if st.session_state.app_role == "GM":
             f_edge = st.checkbox("Frenzy Edge?", value=False, key="gm_edge")
             tn = st.number_input("TN:", value=4, step=1, key="gm_tn")
             if st.button("🎲 Make Trait Roll", type="primary", use_container_width=True, key="gm_trait_btn"):
-                emb = execute_dropdown_trait_roll(p_name, d_die, s_mod, (act-1)*-2, tn, is_frenzy=f_edge)
+                emb = execute_dropdown_trait_roll("Game Master", d_die, s_mod, (act-1)*-2, tn, is_frenzy=f_edge)
                 send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
         else:
             d_str = st.text_input("Formula:", key="gm_str_input")
             d_ap = st.number_input("AP:", min_value=0, step=1, key="gm_ap_input")
             if st.button("💥 Fire Damage Roll", type="primary", use_container_width=True, key="gm_dmg_btn"):
-                emb, tot = execute_formula_damage_roll(p_name, d_str, d_ap)
+                emb, tot = execute_formula_damage_roll("Game Master", d_str, d_ap)
                 if emb: send_discord_roll(emb, is_blind=blind_roll); st.session_state.roll_history.insert(0, (emb, blind_roll))
 
         st.markdown("---")
@@ -459,8 +453,6 @@ if st.session_state.app_role == "GM":
 # ==========================================
 else:
     st.header("🗡️ Player Action Console")
-    
-    # 🌟 NEW RULE: Player rolls automatically push to the public discord channel
     blind_roll = False
     
     tab_sync, tab_dice = st.tabs(["📡 Live Table Sync", "🎲 Action Dice Tray"])
